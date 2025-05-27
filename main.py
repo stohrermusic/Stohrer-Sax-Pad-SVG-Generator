@@ -1,9 +1,10 @@
-# Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool
+# Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool with Presets
 
 import svgwrite
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import json
 
 # Constants for material rules
 FELT_OFFSET = 0.75
@@ -17,6 +18,8 @@ LAYER_COLORS = {
     'center_hole': 'dimgray',
     'engraving': 'orange'
 }
+
+PRESET_FILE = "pad_presets.json"
 
 def leather_back_wrap(pad_size):
     if pad_size <= 10:
@@ -97,31 +100,52 @@ def parse_pad_list(pad_input):
             continue
     return pad_list
 
+def save_preset(name, pad_text):
+    try:
+        if os.path.exists("pad_presets.json"):
+            with open("pad_presets.json", 'r') as f:
+                presets = json.load(f)
+        else:
+            presets = {}
+        presets[name] = pad_text
+        with open("pad_presets.json", 'w') as f:
+            json.dump(presets, f, indent=2)
+        messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
+    except Exception as e:
+        messagebox.showerror("Error Saving Preset", str(e))
+
+def load_presets():
+    if os.path.exists("pad_presets.json"):
+        with open("pad_presets.json", 'r') as f:
+            return json.load(f)
+    return {}
+
 def launch_gui():
     root = tk.Tk()
     root.title("Stohrer Sax Pad SVG Generator")
-    root.geometry("600x500")
+    root.geometry("600x560")
+    root.configure(bg="#FFFDD0")
 
-    tk.Label(root, text="Enter pad sizes (e.g. 42.0x3):").pack(pady=5)
+    tk.Label(root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
     pad_entry = tk.Text(root, height=10)
     pad_entry.pack(fill="x", padx=10)
 
-    tk.Label(root, text="Select materials:").pack(pady=5)
+    tk.Label(root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
     material_vars = {'felt': tk.BooleanVar(), 'card': tk.BooleanVar(), 'leather': tk.BooleanVar()}
     for m in material_vars:
-        tk.Checkbutton(root, text=m.capitalize(), variable=material_vars[m]).pack(anchor='w', padx=20)
+        tk.Checkbutton(root, text=m.capitalize(), variable=material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
 
-    tk.Label(root, text="Sheet width (inches):").pack()
+    tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
     width_entry = tk.Entry(root)
     width_entry.insert(0, "13.5")
     width_entry.pack()
 
-    tk.Label(root, text="Sheet height (inches):").pack()
+    tk.Label(root, text="Sheet height (inches):", bg="#FFFDD0").pack()
     height_entry = tk.Entry(root)
     height_entry.insert(0, "10")
     height_entry.pack()
 
-    tk.Label(root, text="Output filename base (no extension):").pack(pady=5)
+    tk.Label(root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
     filename_entry = tk.Entry(root)
     filename_entry.insert(0, "my_pad_job")
     filename_entry.pack(fill="x", padx=10)
@@ -151,7 +175,30 @@ def launch_gui():
 
         messagebox.showinfo("Done", "SVGs generated successfully.")
 
+    def on_save_preset():
+        name = tk.simpledialog.askstring("Save Preset", "Enter a name for this preset:")
+        if name:
+            save_preset(name, pad_entry.get("1.0", tk.END))
+
+    def on_load_preset(selected_name):
+        presets = load_presets()
+        if selected_name in presets:
+            pad_entry.delete("1.0", tk.END)
+            pad_entry.insert(tk.END, presets[selected_name])
+
     tk.Button(root, text="Generate SVGs", command=on_generate).pack(pady=15)
+
+    preset_frame = tk.Frame(root, bg="#FFFDD0")
+    preset_frame.pack(pady=10)
+    tk.Button(preset_frame, text="Save Pad Sizes as Preset", command=on_save_preset).pack(side="left", padx=5)
+
+    saved_presets = load_presets()
+    preset_names = list(saved_presets.keys())
+    preset_var = tk.StringVar()
+    preset_menu = ttk.Combobox(preset_frame, textvariable=preset_var, values=preset_names, state="readonly")
+    preset_menu.set("Load Preset")
+    preset_menu.pack(side="left", padx=5)
+    preset_menu.bind("<<ComboboxSelected>>", lambda e: on_load_preset(preset_var.get()))
 
     root.mainloop()
 
