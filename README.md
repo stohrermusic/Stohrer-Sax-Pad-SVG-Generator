@@ -5,7 +5,7 @@ Windows only for now.
 
 Should work for leather between .011"- .014", and sizing of leather disc assumes a .125" thick felt with cardstock between .010 and .025 being acceptable for overwrap, providing for a final pad thickness of .160" to .175" or so, but YYMV.
 
-You will need to apply your own feeds/speeds and kerf settings depending on your cutter in lightburn. 
+You will need to apply your own feeds/speeds and kerf settings depending on your cutter in Lightburn. SVGs may not present correctly in other apps (especially default image viewers).  
 
 I have no idea how to code, I had chatgpt make this for me and stumbled through.  
 
