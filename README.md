@@ -7,7 +7,7 @@ I have no idea how to code, I had chatgpt make this for me and stumbled through.
 
 make sure to enter the pad sizes like it suggests, e.g. "34.0 x 10" without the quotes, and each size on a different line.
 
-Click on "releases" and download the exe.  
+Click on "releases" and download the exe.  https://github.com/stohrermusic/Stohrer-Sax-Pad-SVG-Generator/releases/tag/saxophone
 
 Put the .exe in a folder.  Your presets will be saved in a json file in that folder.  
 
