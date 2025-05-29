@@ -89,7 +89,7 @@ def create_grid(canvas, width_px, height_px, scale):
     for i in range(int(height_px // spacing)):
         y = i * spacing
         canvas.create_line(0, y, width_px, y, fill='lightgray')
-        canvas.create_text(2, y + 2, anchor='nw', text=f"{i}"", fill='gray')
+        canvas.create_text(2, y + 2, anchor='nw', text=f"{i}", fill='gray')
 
 def preview_layout(pads, material, width_mm, height_mm, root):
     width_px = width_mm * 2
