@@ -1,7 +1,7 @@
 # Stohrer-Sax-Pad-SVG-Generator BETA branch
 Does not currently work!
 
-beta feature attempt: visual layout preview with drag and drop capability to assist with unusual shape material sheets (which would be especially useful for leather)
+beta feature attempt: visual layout preview with drag and drop capability to assist with unusual shape material sheets (which would be especially useful for leather) but let's be honest you can just drag and drop stuff in lightburn instead.  
 
 Generates SVGs for laser cutting saxophone felts, cards, and leathers.  Current version is 1.01.
 
