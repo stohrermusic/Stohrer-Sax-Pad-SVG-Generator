@@ -85,7 +85,7 @@ def create_grid(canvas, width_px, height_px, scale):
     for i in range(int(width_px // spacing)):
         x = i * spacing
         canvas.create_line(x, 0, x, height_px, fill='lightgray')
-        canvas.create_text(x + 2, 10, anchor='nw', text=f"{i}"", fill='gray')
+        canvas.create_text(x + 2, 10, anchor='nw', text=f"{i}", fill='gray')
     for i in range(int(height_px // spacing)):
         y = i * spacing
         canvas.create_line(0, y, width_px, y, fill='lightgray')
