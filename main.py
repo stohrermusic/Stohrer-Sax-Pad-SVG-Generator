@@ -1,11 +1,13 @@
-# Stohrer Sax Pad SVG Generator - Complete GUI with Drag, Grid, and Docked Preview
+
+# Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool with Docked Preview and Enhanced Interaction
+
 import svgwrite
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 FELT_OFFSET = 0.75
-CARD_OFFSET = FELT_OFFSET + 2.0
+CARD_OFFSET = FELT_OFFSET + 2.0  # Tapered card
 CENTER_HOLE_DIAMETER = 3.5
 
 LAYER_COLORS = {
@@ -16,9 +18,8 @@ LAYER_COLORS = {
     'engraving': 'orange'
 }
 
-positions = []
-drag_data = {'item': None, 'x': 0, 'y': 0}
-preview_windows = {}
+positions = {}  # key = (material, index), value = list of positions
+
 
 def leather_back_wrap(pad_size):
     if pad_size <= 10:
@@ -30,8 +31,10 @@ def leather_back_wrap(pad_size):
     else:
         return 3.5
 
+
 def should_have_center_hole(pad_size):
     return pad_size >= 16.5
+
 
 def generate_svg(pads, material, width_mm, height_mm, filename):
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"))
@@ -48,21 +51,30 @@ def generate_svg(pads, material, width_mm, height_mm, filename):
                 diameter = round(diameter * 2) / 2
             else:
                 continue
-            x, y = positions[i][j] if i < len(positions) and j < len(positions[i]) else (10, 10)
+
+            pos_key = (material, i)
+            x, y = positions.get(pos_key, [(10 + j * (diameter + 1), 10)])[j % len(positions.get(pos_key, [(10, 10)]))]
             cx = x + diameter / 2
             cy = y + diameter / 2
-            dwg.add(dwg.circle(center=(cx, cy), r=diameter / 2, stroke=LAYER_COLORS[material], fill='none'))
+            dwg.add(dwg.circle(center=(cx, cy), r=diameter/2, stroke=LAYER_COLORS[material], fill='none'))
+
             if material != 'leather' and should_have_center_hole(pad_size):
                 dwg.add(dwg.circle(center=(cx, cy), r=CENTER_HOLE_DIAMETER / 2, stroke=LAYER_COLORS['center_hole'], fill='none'))
+
             if material in ['felt', 'card']:
                 radius = (diameter / 2 + CENTER_HOLE_DIAMETER / 2) / 2
-                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'), insert=(cx, cy - radius),
-                                 text_anchor="middle", alignment_baseline="middle", font_size="2mm", fill=LAYER_COLORS['engraving']))
+                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
+                                 insert=(cx, cy - radius),
+                                 text_anchor="middle", alignment_baseline="middle",
+                                 font_size="2mm", fill=LAYER_COLORS['engraving']))
             elif material == 'leather':
                 radius = diameter / 2 - 1.0
-                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'), insert=(cx, cy - radius),
-                                 text_anchor="middle", alignment_baseline="middle", font_size="2mm", fill=LAYER_COLORS['engraving']))
+                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
+                                 insert=(cx, cy - radius),
+                                 text_anchor="middle", alignment_baseline="middle",
+                                 font_size="2mm", fill=LAYER_COLORS['engraving']))
     dwg.save()
+
 
 def parse_pad_list(pad_input):
     pad_list = []
@@ -74,121 +86,134 @@ def parse_pad_list(pad_input):
             continue
     return pad_list
 
-def preview_layout(pads, material, width_mm, height_mm, root):
-    if material in preview_windows:
-        preview_windows[material].destroy()
-        del preview_windows[material]
-        return
 
-    window = tk.Toplevel(root)
-    window.title(f"{material.upper()} Layout")
-    window.geometry(f"{int(root.winfo_width())}x{int(root.winfo_height())}")
-    canvas = tk.Canvas(window, width=width_mm * 2, height=height_mm * 2, bg='white')
-    canvas.pack()
+class PadPreview(tk.Canvas):
+    def __init__(self, parent, width, height, material, pads, *args, **kwargs):
+        super().__init__(parent, width=width, height=height, bg='white', *args, **kwargs)
+        self.scale = 2
+        self.material = material
+        self.pads = pads
+        self.discs = {}
+        self.bind("<ButtonPress-1>", self.start_drag)
+        self.bind("<B1-Motion>", self.do_drag)
+        self.drag_data = {'item': None, 'start_x': 0, 'start_y': 0}
+        self.draw_grid(width, height)
+        self.draw_discs()
 
-    preview_windows[material] = window
+    def draw_grid(self, w, h):
+        inch = 25.4 * self.scale
+        for x in range(0, int(w), int(inch)):
+            self.create_line(x, 0, x, h, fill='lightgray')
+        for y in range(0, int(h), int(inch)):
+            self.create_line(0, y, w, y, fill='lightgray')
 
-    global positions
-    positions = []
-    scale = 2.0
-    spacing = 1.0
-    x, y = 10, 10
-    row_height = 0
+    def draw_discs(self):
+        self.delete("disc")
+        for i, pad in enumerate(self.pads):
+            pad_size = pad['size']
+            qty = pad['qty']
+            for j in range(qty):
+                if self.material == 'felt':
+                    diameter = pad_size - FELT_OFFSET
+                elif self.material == 'card':
+                    diameter = pad_size - CARD_OFFSET
+                elif self.material == 'leather':
+                    diameter = pad_size + 2 * (3.175 + leather_back_wrap(pad_size))
+                    diameter = round(diameter * 2) / 2
+                else:
+                    continue
 
-    def start_drag(event):
-        drag_data['item'] = canvas.find_closest(event.x, event.y)[0]
-        drag_data['x'] = event.x
-        drag_data['y'] = event.y
+                x = 10 + (j * (diameter + 2))
+                y = 10 + i * (diameter + 10)
+                cx = x + diameter / 2
+                cy = y + diameter / 2
+                r = diameter / 2
 
-    def on_drag(event):
-        if drag_data['item']:
-            dx = event.x - drag_data['x']
-            dy = event.y - drag_data['y']
-            canvas.move(drag_data['item'], dx, dy)
-            drag_data['x'] = event.x
-            drag_data['y'] = event.y
+                pos_key = (self.material, i)
+                if pos_key not in positions:
+                    positions[pos_key] = []
+                if len(positions[pos_key]) <= j:
+                    positions[pos_key].append((x, y))
 
-    def stop_drag(event):
-        drag_data['item'] = None
+                disc = self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=LAYER_COLORS[self.material], fill='', tags=("disc", f"disc_{i}_{j}"))
+                self.discs[disc] = (self.material, i, j)
 
-    for inch in range(int(width_mm / 25.4) + 1):
-        x_inch = inch * 25.4 * scale
-        canvas.create_line(x_inch, 0, x_inch, height_mm * scale, fill="lightgray")
-        canvas.create_text(x_inch + 2, 10, anchor='nw', text=f"{inch}", fill='gray')
+    def start_drag(self, event):
+        item = self.find_closest(event.x, event.y)[0]
+        if item in self.discs:
+            self.drag_data['item'] = item
+            self.drag_data['start_x'] = event.x
+            self.drag_data['start_y'] = event.y
 
-    for inch in range(int(height_mm / 25.4) + 1):
-        y_inch = inch * 25.4 * scale
-        canvas.create_line(0, y_inch, width_mm * scale, y_inch, fill="lightgray")
-        canvas.create_text(2, y_inch + 2, anchor='nw', text=f"{inch}", fill='gray')
+    def do_drag(self, event):
+        item = self.drag_data['item']
+        if item:
+            dx = (event.x - self.drag_data['start_x']) / self.scale
+            dy = (event.y - self.drag_data['start_y']) / self.scale
+            self.move(item, dx * self.scale, dy * self.scale)
+            mat, i, j = self.discs[item]
+            old_x, old_y = positions[(mat, i)][j]
+            positions[(mat, i)][j] = (old_x + dx, old_y + dy)
+            self.drag_data['start_x'] = event.x
+            self.drag_data['start_y'] = event.y
 
-    for i, pad in enumerate(pads):
-        pad_size = pad['size']
-        qty = pad['qty']
-        row = []
-        for j in range(qty):
-            if material == 'felt':
-                diameter = pad_size - FELT_OFFSET
-            elif material == 'card':
-                diameter = pad_size - CARD_OFFSET
-            elif material == 'leather':
-                diameter = pad_size + 2 * (3.175 + leather_back_wrap(pad_size))
-                diameter = round(diameter * 2) / 2
-            else:
-                continue
-
-            if x + diameter > width_mm:
-                x = 10
-                y += row_height + spacing
-                row_height = 0
-            if y + diameter > height_mm:
-                break
-
-            cx = x + diameter / 2
-            cy = y + diameter / 2
-            r = diameter / 2
-            scaled = scale
-
-            tag = f"disc_{i}_{j}"
-            item = canvas.create_oval(cx * scaled - r * scaled, cy * scaled - r * scaled,
-                                      cx * scaled + r * scaled, cy * scaled + r * scaled,
-                                      outline=LAYER_COLORS[material], tags=tag)
-            canvas.tag_bind(item, "<ButtonPress-1>", start_drag)
-            canvas.tag_bind(item, "<B1-Motion>", on_drag)
-            canvas.tag_bind(item, "<ButtonRelease-1>", stop_drag)
-
-            row.append((x, y))
-            row_height = max(row_height, diameter)
-            x += diameter + spacing
-        positions.append(row)
 
 def launch_gui():
     root = tk.Tk()
     root.title("Stohrer Sax Pad SVG Generator")
+    root.geometry("1200x600")
     root.configure(bg="#FFFDD0")
 
-    tk.Label(root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
-    pad_entry = tk.Text(root, height=10)
-    pad_entry.pack(fill="x", padx=10)
+    left_frame = tk.Frame(root, bg="#FFFDD0")
+    left_frame.pack(side='left', fill='y', padx=10, pady=10)
 
-    tk.Label(root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
+    right_frame = tk.Frame(root)
+    right_frame.pack(side='right', fill='both', expand=True)
+
+    tk.Label(left_frame, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack()
+    pad_entry = tk.Text(left_frame, height=10)
+    pad_entry.pack(fill="x", pady=5)
+
+    tk.Label(left_frame, text="Select materials:", bg="#FFFDD0").pack()
     material_vars = {'felt': tk.BooleanVar(), 'card': tk.BooleanVar(), 'leather': tk.BooleanVar()}
     for m in material_vars:
-        tk.Checkbutton(root, text=m.capitalize(), variable=material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
+        tk.Checkbutton(left_frame, text=m.capitalize(), variable=material_vars[m], bg="#FFFDD0").pack(anchor='w')
 
-    tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
-    width_entry = tk.Entry(root)
+    tk.Label(left_frame, text="Sheet width (inches):", bg="#FFFDD0").pack()
+    width_entry = tk.Entry(left_frame)
     width_entry.insert(0, "13.5")
     width_entry.pack()
 
-    tk.Label(root, text="Sheet height (inches):", bg="#FFFDD0").pack()
-    height_entry = tk.Entry(root)
+    tk.Label(left_frame, text="Sheet height (inches):", bg="#FFFDD0").pack()
+    height_entry = tk.Entry(left_frame)
     height_entry.insert(0, "10")
     height_entry.pack()
 
-    tk.Label(root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
-    filename_entry = tk.Entry(root)
+    tk.Label(left_frame, text="Output filename base:", bg="#FFFDD0").pack()
+    filename_entry = tk.Entry(left_frame)
     filename_entry.insert(0, "my_pad_job")
-    filename_entry.pack(fill="x", padx=10)
+    filename_entry.pack(fill="x", pady=5)
+
+    preview_canvas = None
+
+    def on_preview():
+        nonlocal preview_canvas
+        if preview_canvas:
+            preview_canvas.destroy()
+            preview_canvas = None
+            return
+        try:
+            width_mm = float(width_entry.get()) * 25.4
+            height_mm = float(height_entry.get()) * 25.4
+        except:
+            messagebox.showerror("Error", "Invalid dimensions.")
+            return
+
+        pads = parse_pad_list(pad_entry.get("1.0", tk.END))
+        for material, var in material_vars.items():
+            if var.get():
+                preview_canvas = PadPreview(right_frame, int(width_mm * 2), int(height_mm * 2), material, pads)
+                preview_canvas.pack()
 
     def on_generate():
         try:
@@ -197,36 +222,29 @@ def launch_gui():
         except:
             messagebox.showerror("Error", "Invalid sheet dimensions.")
             return
+
         pads = parse_pad_list(pad_entry.get("1.0", tk.END))
         if not pads:
             messagebox.showerror("Error", "No valid pad sizes entered.")
             return
+
         base = filename_entry.get().strip()
         save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
         if not save_dir:
             return
+
         for material, var in material_vars.items():
             if var.get():
                 filename = os.path.join(save_dir, f"{base}_{material}.svg")
                 generate_svg(pads, material, width_mm, height_mm, filename)
-        messagebox.showinfo("Done", "SVGs generated successfully.")
 
-    def on_preview():
-        try:
-            width_mm = float(width_entry.get()) * 25.4
-            height_mm = float(height_entry.get()) * 25.4
-        except:
-            messagebox.showerror("Error", "Invalid sheet dimensions.")
-            return
-        pads = parse_pad_list(pad_entry.get("1.0", tk.END))
-        for material, var in material_vars.items():
-            if var.get():
-                preview_layout(pads, material, width_mm, height_mm, root)
+        messagebox.showinfo("Done", "SVGs generated.")
 
-    tk.Button(root, text="Preview Layout", command=on_preview).pack(pady=10)
-    tk.Button(root, text="Generate SVGs", command=on_generate).pack(pady=10)
+    tk.Button(left_frame, text="Preview Layout", command=on_preview).pack(pady=5)
+    tk.Button(left_frame, text="Generate SVGs", command=on_generate).pack(pady=5)
 
     root.mainloop()
+
 
 if __name__ == '__main__':
     launch_gui()
