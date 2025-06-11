@@ -1,32 +1,19 @@
 
-# Stohrer Sax Pad SVG Generator - Full Version with V3 Rules and Collision-Aware Nesting
+# Stohrer Sax Pad SVG Generator - Full Version with Presets, V3 Rules, and Collision-Aware Nesting
 
 import svgwrite
 import os
-import tkinter as tk
-from tkinter import filedialog, messagebox
-
 import json
-
-PRESET_FILE = "pad_presets.json"
-
-def load_presets():
-    if os.path.exists(PRESET_FILE):
-        with open(PRESET_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_presets(presets):
-    with open(PRESET_FILE, "w") as f:
-        json.dump(presets, f, indent=2)
-
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 from math import sqrt
 
-# V3 Constants
+# Constants
 FELT_OFFSET = 0.75
 CARD_OFFSET = FELT_OFFSET + 2.0
 CENTER_HOLE_DIAMETER = 3.5
 SPACING_MM = 1.0
+PRESET_FILE = "pad_presets.json"
 
 LAYER_COLORS = {
     'felt': 'black',
@@ -58,6 +45,16 @@ def parse_pad_list(pad_input):
         except:
             continue
     return pad_list
+
+def load_presets():
+    if os.path.exists(PRESET_FILE):
+        with open(PRESET_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_presets(presets):
+    with open(PRESET_FILE, "w") as f:
+        json.dump(presets, f, indent=2)
 
 def generate_svg(pads, material, width_mm, height_mm, filename):
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"))
@@ -92,7 +89,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename):
             while x + dia + SPACING_MM <= width_mm:
                 cx = x + r
                 cy = y + r
-                if not any(sqrt((cx - px)**2 + (cy - py)**2) < (r + pr + SPACING_MM) for _, px, py, pr in placed):
+                if not any((cx - px)**2 + (cy - py)**2 < (r + pr + SPACING_MM)**2 for _, px, py, pr in placed):
                     placed.append((pad_size, cx, cy, r))
                     placed_successfully = True
                     break
@@ -109,7 +106,6 @@ def generate_svg(pads, material, width_mm, height_mm, filename):
             dwg.add(dwg.circle(center=(cx, cy), r=CENTER_HOLE_DIAMETER / 2,
                                stroke=LAYER_COLORS['center_hole'], fill='none'))
 
-        # V3 engraving placement rules
         if material == 'leather':
             engraving_y = cy - (r - 1.0)
         else:
@@ -125,29 +121,34 @@ def launch_gui():
     root = tk.Tk()
     root.title("Stohrer Sax Pad SVG Generator")
     root.configure(bg="#FFFDD0")
-    root.geometry("600x500")
+    root.geometry("600x560")
 
     tk.Label(root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
     pad_entry = tk.Text(root, height=10)
+    pad_entry.pack(fill="x", padx=10)
 
+    # Preset section
     preset_frame = tk.Frame(root, bg="#FFFDD0")
     preset_frame.pack(pady=5)
     tk.Label(preset_frame, text='Presets:', bg="#FFFDD0").grid(row=0, column=0)
     preset_var = tk.StringVar()
     preset_dropdown = tk.OptionMenu(preset_frame, preset_var, '')
     preset_dropdown.grid(row=0, column=1)
+
     def refresh_presets():
         presets = load_presets()
         menu = preset_dropdown['menu']
         menu.delete(0, 'end')
         for name in presets:
             menu.add_command(label=name, command=lambda v=name: preset_var.set(v))
+
     def apply_preset():
         name = preset_var.get()
         presets = load_presets()
         if name in presets:
             pad_entry.delete('1.0', tk.END)
             pad_entry.insert(tk.END, presets[name])
+
     def save_preset():
         name = preset_var.get()
         if name:
@@ -155,6 +156,7 @@ def launch_gui():
             presets[name] = pad_entry.get('1.0', tk.END).strip()
             save_presets(presets)
             refresh_presets()
+
     def delete_preset():
         name = preset_var.get()
         presets = load_presets()
@@ -163,12 +165,11 @@ def launch_gui():
             save_presets(presets)
             refresh_presets()
             preset_var.set('')
+
     tk.Button(preset_frame, text='Apply', command=apply_preset).grid(row=0, column=2)
     tk.Button(preset_frame, text='Save', command=save_preset).grid(row=0, column=3)
     tk.Button(preset_frame, text='Delete', command=delete_preset).grid(row=0, column=4)
     refresh_presets()
-
-    pad_entry.pack(fill="x", padx=10)
 
     tk.Label(root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
     material_vars = {'felt': tk.BooleanVar(), 'card': tk.BooleanVar(), 'leather': tk.BooleanVar()}
