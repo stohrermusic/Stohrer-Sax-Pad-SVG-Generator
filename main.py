@@ -1,42 +1,5 @@
 
-# Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool with Presets and Leather Center Holes
-
-import svgwrite
-import os
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, simpledialog
-import json
-
-# Constants for material rules
-FELT_OFFSET = 0.75
-CARD_OFFSET = FELT_OFFSET + 2.0
-CENTER_HOLE_DIAMETER = 3.5
-
-LAYER_COLORS = {
-    'felt': 'black',
-    'card': 'blue',
-    'leather': 'red',
-    'center_hole': 'dimgray',
-    'engraving': 'orange'
-}
-
-PRESET_FILE = "pad_presets.json"
-
-def leather_back_wrap(pad_size):
-    if pad_size <= 10:
-        return 1.3
-    elif pad_size <= 15:
-        return 1.3 + (pad_size - 10) * (0.7 / 5.0)
-    elif pad_size <= 40:
-        return 2.0 + (pad_size - 15) * (1.5 / 25.0)
-    else:
-        return 3.5
-
-def should_have_center_hole(pad_size):
-    return pad_size >= 16.5
-
-
-def generate_svg(pads, material, width_mm, height_mm, filename):
+def generate_svg(pads, material, width_mm, height_mm, filename, hole_setting):
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"))
     spacing_mm = 1.0
     discs = []
@@ -92,14 +55,20 @@ def generate_svg(pads, material, width_mm, height_mm, filename):
     for pad_size, cx, cy, r in placed:
         dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=LAYER_COLORS[material], fill='none'))
 
-        if pad_size >= 16.5:
-            dwg.add(dwg.circle(center=(cx, cy), r=CENTER_HOLE_DIAMETER / 2,
+        # Center hole logic
+        hole_dia = 0
+        if hole_setting == "3.5mm" and pad_size >= 16.5:
+            hole_dia = 3.5
+        elif hole_setting == "3.0mm" and pad_size >= 16.5:
+            hole_dia = 3.0
+        if hole_dia > 0:
+            dwg.add(dwg.circle(center=(cx, cy), r=hole_dia / 2,
                                stroke=LAYER_COLORS['center_hole'], fill='none'))
 
         if material == 'leather':
             engraving_y = cy - (r - 1.0)
         else:
-            engraving_y = cy - ((r + CENTER_HOLE_DIAMETER / 2) / 2)
+            engraving_y = cy - ((r + (hole_dia / 2 if hole_dia else CENTER_HOLE_DIAMETER / 2)) / 2)
 
         dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
                          insert=(cx, engraving_y),
@@ -107,6 +76,44 @@ def generate_svg(pads, material, width_mm, height_mm, filename):
                          font_size="2mm", fill=LAYER_COLORS['engraving']))
 
     dwg.save()
+
+
+# Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool with Presets and Leather Center Holes
+
+import svgwrite
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk, simpledialog
+import json
+
+# Constants for material rules
+FELT_OFFSET = 0.75
+CARD_OFFSET = FELT_OFFSET + 2.0
+CENTER_HOLE_DIAMETER = 3.5
+
+LAYER_COLORS = {
+    'felt': 'black',
+    'card': 'blue',
+    'leather': 'red',
+    'center_hole': 'dimgray',
+    'engraving': 'orange'
+}
+
+PRESET_FILE = "pad_presets.json"
+
+def leather_back_wrap(pad_size):
+    if pad_size <= 10:
+        return 1.3
+    elif pad_size <= 15:
+        return 1.3 + (pad_size - 10) * (0.7 / 5.0)
+    elif pad_size <= 40:
+        return 2.0 + (pad_size - 15) * (1.5 / 25.0)
+    else:
+        return 3.5
+
+def should_have_center_hole(pad_size):
+    return pad_size >= 16.5
+
 
 def parse_pad_list(pad_input):
     pad_list = []
@@ -163,7 +170,16 @@ def launch_gui():
     for m in material_vars:
         tk.Checkbutton(root, text=m.capitalize(), variable=material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
 
-    tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
+    
+    tk.Label(root, text="Center hole:", bg="#FFFDD0").pack(pady=5)
+    hole_var = tk.StringVar(value="3.5mm")
+    hole_menu = tk.OptionMenu(root, hole_var, "No center holes", "3.5mm", "3.0mm")
+    hole_menu.pack()
+
+    tk.Label(root, text="Center hole size:", bg="#FFFDD0").pack()
+    hole_var = tk.StringVar(value="3.5mm")
+    tk.OptionMenu(root, hole_var, "No center holes", "3.5mm", "3.0mm").pack()
+tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
     width_entry = tk.Entry(root)
     width_entry.insert(0, "13.5")
     width_entry.pack()
@@ -199,7 +215,7 @@ def launch_gui():
         for material, var in material_vars.items():
             if var.get():
                 filename = os.path.join(save_dir, f"{base}_{material}.svg")
-                generate_svg(pads, material, width_mm, height_mm, filename)
+                generate_svg(pads, material, width_mm, height_mm, filename, hole_var.get())
 
         messagebox.showinfo("Done", "SVGs generated successfully.")
 
