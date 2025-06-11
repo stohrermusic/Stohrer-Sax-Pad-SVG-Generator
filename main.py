@@ -5,6 +5,21 @@ import svgwrite
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
+import json
+
+PRESET_FILE = "pad_presets.json"
+
+def load_presets():
+    if os.path.exists(PRESET_FILE):
+        with open(PRESET_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_presets(presets):
+    with open(PRESET_FILE, "w") as f:
+        json.dump(presets, f, indent=2)
+
 from math import sqrt
 
 # V3 Constants
@@ -114,6 +129,45 @@ def launch_gui():
 
     tk.Label(root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
     pad_entry = tk.Text(root, height=10)
+
+    preset_frame = tk.Frame(root, bg="#FFFDD0")
+    preset_frame.pack(pady=5)
+    tk.Label(preset_frame, text='Presets:', bg="#FFFDD0").grid(row=0, column=0)
+    preset_var = tk.StringVar()
+    preset_dropdown = tk.OptionMenu(preset_frame, preset_var, '')
+    preset_dropdown.grid(row=0, column=1)
+    def refresh_presets():
+        presets = load_presets()
+        menu = preset_dropdown['menu']
+        menu.delete(0, 'end')
+        for name in presets:
+            menu.add_command(label=name, command=lambda v=name: preset_var.set(v))
+    def apply_preset():
+        name = preset_var.get()
+        presets = load_presets()
+        if name in presets:
+            pad_entry.delete('1.0', tk.END)
+            pad_entry.insert(tk.END, presets[name])
+    def save_preset():
+        name = preset_var.get()
+        if name:
+            presets = load_presets()
+            presets[name] = pad_entry.get('1.0', tk.END).strip()
+            save_presets(presets)
+            refresh_presets()
+    def delete_preset():
+        name = preset_var.get()
+        presets = load_presets()
+        if name in presets:
+            del presets[name]
+            save_presets(presets)
+            refresh_presets()
+            preset_var.set('')
+    tk.Button(preset_frame, text='Apply', command=apply_preset).grid(row=0, column=2)
+    tk.Button(preset_frame, text='Save', command=save_preset).grid(row=0, column=3)
+    tk.Button(preset_frame, text='Delete', command=delete_preset).grid(row=0, column=4)
+    refresh_presets()
+
     pad_entry.pack(fill="x", padx=10)
 
     tk.Label(root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
