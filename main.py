@@ -152,7 +152,7 @@ def launch_gui():
     hole_var = tk.StringVar(value="3.5mm")
     tk.OptionMenu(root, hole_var, "No center holes", "3.5mm", "3.0mm").pack()
 
-tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
+    tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
     width_entry = tk.Entry(root)
     width_entry.insert(0, "13.5")
     width_entry.pack()
