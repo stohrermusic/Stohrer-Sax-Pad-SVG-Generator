@@ -1,83 +1,4 @@
 
-def generate_svg(pads, material, width_mm, height_mm, filename, hole_setting):
-    dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"))
-    spacing_mm = 1.0
-    discs = []
-
-    for pad in pads:
-        pad_size = pad['size']
-        qty = pad['qty']
-        if material == 'felt':
-            diameter = pad_size - 0.75
-        elif material == 'card':
-            diameter = pad_size - 2.75
-        elif material == 'leather':
-            def leather_back_wrap(pad_size):
-                if pad_size <= 10:
-                    return 1.3
-                elif pad_size <= 15:
-                    return 1.3 + (pad_size - 10) * (0.7 / 5.0)
-                elif pad_size <= 40:
-                    return 2.0 + (pad_size - 15) * (1.5 / 25.0)
-                else:
-                    return 3.5
-            back_wrap = leather_back_wrap(pad_size)
-            diameter = pad_size + 2 * (3.175 + back_wrap)
-            diameter = round(diameter * 2) / 2
-        else:
-            continue
-        for _ in range(qty):
-            discs.append((pad_size, diameter))
-
-    discs.sort(key=lambda x: -x[1])
-    placed = []
-
-    for pad_size, dia in discs:
-        r = dia / 2
-        x = spacing_mm
-        y = spacing_mm
-        placed_successfully = False
-
-        while y + dia + spacing_mm <= height_mm:
-            while x + dia + spacing_mm <= width_mm:
-                cx = x + r
-                cy = y + r
-                if not any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed):
-                    placed.append((pad_size, cx, cy, r))
-                    placed_successfully = True
-                    break
-                x += 1
-            if placed_successfully:
-                break
-            x = spacing_mm
-            y += 1
-
-    for pad_size, cx, cy, r in placed:
-        dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=LAYER_COLORS[material], fill='none'))
-
-        # Center hole logic
-        hole_dia = 0
-        if hole_setting == "3.5mm" and pad_size >= 16.5:
-            hole_dia = 3.5
-        elif hole_setting == "3.0mm" and pad_size >= 16.5:
-            hole_dia = 3.0
-        if hole_dia > 0:
-            dwg.add(dwg.circle(center=(cx, cy), r=hole_dia / 2,
-                               stroke=LAYER_COLORS['center_hole'], fill='none'))
-
-        if material == 'leather':
-            engraving_y = cy - (r - 1.0)
-        else:
-            engraving_y = cy - ((r + (hole_dia / 2 if hole_dia else CENTER_HOLE_DIAMETER / 2)) / 2)
-
-        dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
-                         insert=(cx, engraving_y),
-                         text_anchor="middle", alignment_baseline="middle",
-                         font_size="2mm", fill=LAYER_COLORS['engraving']))
-
-    dwg.save()
-
-
 # Stohrer Sax Pad SVG Generator - Full GUI and SVG Export Tool with Presets and Leather Center Holes
 
 import svgwrite
@@ -114,6 +35,62 @@ def leather_back_wrap(pad_size):
 def should_have_center_hole(pad_size):
     return pad_size >= 16.5
 
+def generate_svg(pads, material, width_mm, height_mm, filename):
+    dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"))
+    x, y = 10, 10
+    spacing = 1.0
+    row_height = 0
+
+    for pad in pads:
+        pad_size = pad['size']
+        qty = pad['qty']
+
+        for _ in range(qty):
+            if material == 'felt':
+                diameter = pad_size - FELT_OFFSET
+            elif material == 'card':
+                diameter = pad_size - CARD_OFFSET
+            elif material == 'leather':
+                back_wrap = leather_back_wrap(pad_size)
+                diameter = pad_size + 2 * (3.175 + back_wrap)
+                diameter = round(diameter * 2) / 2
+            else:
+                continue
+
+            if x + diameter > width_mm:
+                x = 10
+                y += row_height + spacing
+                row_height = 0
+            if y + diameter > height_mm:
+                messagebox.showwarning("Layout Overflow", f"Not enough space to place all pads on the sheet.")
+                return
+
+            cx = x + diameter / 2
+            cy = y + diameter / 2
+
+            dwg.add(dwg.circle(center=(cx, cy), r=diameter/2, stroke=LAYER_COLORS[material], fill='none'))
+
+            if should_have_center_hole(pad_size):
+                dwg.add(dwg.circle(center=(cx, cy), r=CENTER_HOLE_DIAMETER / 2,
+                                   stroke=LAYER_COLORS['center_hole'], fill='none'))
+
+            if material in ['felt', 'card']:
+                radius = (diameter / 2 + CENTER_HOLE_DIAMETER / 2) / 2
+                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
+                                 insert=(cx, cy - radius),
+                                 text_anchor="middle", alignment_baseline="middle",
+                                 font_size="2mm", fill=LAYER_COLORS['engraving']))
+            elif material == 'leather':
+                radius = diameter / 2 - 1.0
+                dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
+                                 insert=(cx, cy - radius),
+                                 text_anchor="middle", alignment_baseline="middle",
+                                 font_size="2mm", fill=LAYER_COLORS['engraving']))
+
+            row_height = max(row_height, diameter)
+            x += diameter + spacing
+
+    dwg.save()
 
 def parse_pad_list(pad_input):
     pad_list = []
@@ -171,15 +148,11 @@ def launch_gui():
         tk.Checkbutton(root, text=m.capitalize(), variable=material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
 
     
-    tk.Label(root, text="Center hole:", bg="#FFFDD0").pack(pady=5)
-    hole_var = tk.StringVar(value="3.5mm")
-    hole_menu = tk.OptionMenu(root, hole_var, "No center holes", "3.5mm", "3.0mm")
-    hole_menu.pack()
-
     tk.Label(root, text="Center hole size:", bg="#FFFDD0").pack()
     hole_var = tk.StringVar(value="3.5mm")
     tk.OptionMenu(root, hole_var, "No center holes", "3.5mm", "3.0mm").pack()
-    tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
+
+tk.Label(root, text="Sheet width (inches):", bg="#FFFDD0").pack()
     width_entry = tk.Entry(root)
     width_entry.insert(0, "13.5")
     width_entry.pack()
@@ -215,7 +188,7 @@ def launch_gui():
         for material, var in material_vars.items():
             if var.get():
                 filename = os.path.join(save_dir, f"{base}_{material}.svg")
-                generate_svg(pads, material, width_mm, height_mm, filename, hole_var.get())
+                generate_svg(pads, material, width_mm, height_mm, filename)
 
         messagebox.showinfo("Done", "SVGs generated successfully.")
 
