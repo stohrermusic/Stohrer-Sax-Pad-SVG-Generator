@@ -18,11 +18,11 @@ PRESET_FILE = "pad_presets.json"
 
 SETTINGS_FILE = "settings.json"
 DEFAULT_SETTINGS = {
-    "units": "in",              # "in" or "mm" for sheet size fields
+    "units": "in",              # "in" or "mm" for the sheet size fields
     "felt_offset_mm": 0.75,     # felt = pad - this
     "card_delta_mm": 2.0,       # card = felt - this
-    "felt_thickness_mm": 3.175, # 0.125"
-    "wrap_bias_pct": 0          # -30..+30%
+    "felt_thickness_mm": 3.175, # default 0.125" felt
+    "wrap_bias_pct": 0          # -30..+30 (percent), scales V3 wrap curve
 }
 
 def load_settings():
@@ -30,9 +30,9 @@ def load_settings():
         try:
             with open(SETTINGS_FILE, "r") as f:
                 data = json.load(f)
-                merged = DEFAULT_SETTINGS.copy()
-                merged.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
-                return merged
+                s = DEFAULT_SETTINGS.copy()
+                s.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
+                return s
         except Exception:
             pass
     return DEFAULT_SETTINGS.copy()
@@ -73,7 +73,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, s):
             felt_d = pad_size - s["felt_offset_mm"]
             diameter = felt_d - s["card_delta_mm"]
         elif material == 'leather':
-            # V3 base curve
+            # V3 base wrap curve
             if pad_size <= 10:
                 base_wrap = 1.3
             elif pad_size <= 15:
@@ -315,7 +315,7 @@ def open_options():
     tk.Button(top, text="Save", command=apply_and_close).grid(row=5, column=0, columnspan=2, pady=10)
     top.grab_set()
 
-# Button row with Options and Generate
+# Button row with Options + Generate
 btn_row = tk.Frame(root, bg="#FFFDD0")
 btn_row.pack(pady=10)
 tk.Button(btn_row, text="Options…", command=open_options).pack(side="left", padx=6)
