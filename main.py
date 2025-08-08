@@ -128,10 +128,9 @@ class PadSVGGeneratorApp:
                 width_mm = width_val * 10
                 height_mm = height_val * 10
             else:
-                # This case should not be reached with the current UI, but is here for safety
-                messagebox.showwarning("Warning", f"Unknown unit '{self.settings['units']}'. Assuming mm.")
-                width_mm = width_val
-                height_mm = height_val
+                # Fallback for an unexpected unit type
+                messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
+                return
 
             pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
             if not pads:
@@ -161,6 +160,8 @@ class PadSVGGeneratorApp:
                 messagebox.showwarning("No Materials Selected", "Please select at least one material (felt, card, leather) to generate files.")
 
         except Exception as e:
+            # This is the key change: print the error to the console in case the messagebox fails
+            print(f"An error occurred during SVG generation: {e}")
             messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
             return
 
@@ -382,8 +383,10 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
 
         dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
                          insert=(f"{cx}mm", f"{engraving_y}mm"),
-                         text_anchor="middle", alignment_baseline="middle",
-                         font_size="2mm", fill=LAYER_COLORS['engraving']))
+                         text_anchor="middle",
+                         dominant_baseline="middle",  # <-- CORRECTED ATTRIBUTE
+                         font_size="2mm",
+                         fill=LAYER_COLORS['engraving']))
 
     dwg.save()
 
