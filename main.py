@@ -29,7 +29,7 @@ SETTINGS_FILE = "app_settings.json" # File to store user settings
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Stohrer Sax Pad SVG Generator v2")
+        self.root.title("Stohrer Sax Pad SVG Generator v1.2")
         self.root.geometry("620x620")
         self.root.configure(bg="#FFFDD0")
 
