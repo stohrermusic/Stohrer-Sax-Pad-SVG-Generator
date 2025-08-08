@@ -198,6 +198,7 @@ class PadSVGGeneratorApp:
             if not save_dir:
                 return
 
+
             files_generated = False
             for material, var in self.material_vars.items():
                 if var.get():
@@ -238,6 +239,7 @@ class PadSVGGeneratorApp:
 
     def on_save_preset(self):
         """Saves the current pad list as a named preset."""
+
         name = simpledialog.askstring("Save Preset", "Enter a name for this preset:")
         if name:
             pad_text = self.pad_entry.get("1.0", tk.END)
