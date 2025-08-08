@@ -255,7 +255,7 @@ class OptionsWindow:
         tk.Radiobutton(unit_frame, text="Centimeters (cm)", variable=self.unit_var, value="cm", bg="#F0EAD6").pack(side="left", padx=10)
 
         # Sizing Rules
-        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (enter positive values for reduction)", bg="#F0EAD6", padx=5, pady=5)
+        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules", bg="#F0EAD6", padx=5, pady=5)
         rules_frame.pack(fill="x", pady=5)
         rules_frame.columnconfigure(1, weight=1)
 
