@@ -151,7 +151,6 @@ class PadSVGGeneratorApp:
                 width_mm = width_val
                 height_mm = height_val
             else:
-                # Fallback for an unexpected unit type
                 messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
                 return
 
@@ -164,7 +163,20 @@ class PadSVGGeneratorApp:
             if not base:
                 messagebox.showerror("Error", "Please enter a base filename.")
                 return
-                
+            
+            # --- PRE-CHECK: Verify all materials can fit before generating any files ---
+            for material, var in self.material_vars.items():
+                if var.get():
+                    if not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
+                        messagebox.showerror(
+                            "Nesting Error",
+                            f"Could not fit all '{material}' pieces on the specified sheet size.\n\n"
+                            "Please increase the sheet dimensions or reduce the number of pads.\n\n"
+                            "No SVG files will be generated."
+                        )
+                        return # Abort the entire operation
+
+            # If the pre-check passes, proceed with generation
             save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
             if not save_dir:
                 return
@@ -183,7 +195,6 @@ class PadSVGGeneratorApp:
                 messagebox.showwarning("No Materials Selected", "Please select at least one material (felt, card, leather) to generate files.")
 
         except Exception as e:
-            # This is the key change: print the error to the console in case the messagebox fails
             print(f"An error occurred during SVG generation: {e}")
             messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
             return
@@ -206,7 +217,7 @@ class PadSVGGeneratorApp:
                 with open(PRESET_FILE, 'r') as f:
                     return json.load(f)
             except json.JSONDecodeError:
-                return {} # Return empty dict if file is corrupted
+                return {}
         return {}
 
     def on_save_preset(self):
@@ -262,23 +273,19 @@ class OptionsWindow:
         self.top.transient(parent)
         self.top.grab_set()
 
-        # --- Variables to hold option values ---
         self.unit_var = tk.StringVar(value=self.settings["units"])
         self.felt_offset_var = tk.DoubleVar(value=self.settings["felt_offset"])
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
         self.leather_mult_var = tk.DoubleVar(value=self.settings["leather_wrap_multiplier"])
 
-        # --- Create Widgets for Options Window ---
         main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
         main_frame.pack(fill="both", expand=True)
 
-        # Units
         unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
         unit_frame.pack(fill="x", pady=5)
         tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=10)
         tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=10)
 
-        # Sizing Rules
         rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (Advanced)", bg="#F0EAD6", padx=5, pady=5)
         rules_frame.pack(fill="x", pady=5)
         rules_frame.columnconfigure(1, weight=1)
@@ -292,7 +299,6 @@ class OptionsWindow:
         tk.Label(rules_frame, text="Leather Wrap Multiplier (1.00=default):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.leather_mult_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
-        # --- Save/Cancel/Default Buttons ---
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
         tk.Button(button_frame, text="Save", command=self.save_options).pack(side="left", padx=10)
@@ -306,8 +312,8 @@ class OptionsWindow:
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
         self.settings["leather_wrap_multiplier"] = self.leather_mult_var.get()
         
-        self.save_callback() # Save settings to file
-        self.update_callback() # Update the main UI
+        self.save_callback()
+        self.update_callback()
         self.top.destroy()
 
     def revert_to_defaults(self):
@@ -337,15 +343,17 @@ def should_have_center_hole(pad_size, hole_option):
     """Determines if a pad of a given size should have a center hole."""
     return hole_option != "No center holes" and pad_size >= 16.5
 
-def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, settings):
-    """Generates and saves a single SVG file for a given material."""
+def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
+    """
+    Performs a dry run of the nesting algorithm to see if all pieces fit.
+    Returns True if they fit, False otherwise.
+    """
     spacing_mm = 1.0
     discs = []
-
-    # Calculate diameters based on material and settings
+    
+    # Calculate diameters for all discs
     for pad in pads:
-        pad_size = pad['size']
-        qty = pad['qty']
+        pad_size, qty = pad['size'], pad['qty']
         diameter = 0
         if material == 'felt':
             diameter = pad_size - settings["felt_offset"]
@@ -354,50 +362,79 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         elif material == 'leather':
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
             diameter = pad_size + 2 * (3.175 + wrap)
-            diameter = round(diameter * 2) / 2 # Round to nearest 0.5
+            diameter = round(diameter * 2) / 2
         else:
             continue
-        
         for _ in range(qty):
             discs.append((pad_size, diameter))
 
-    # --- Nesting Algorithm ---
-    discs.sort(key=lambda x: -x[1]) # Sort from largest to smallest
+    # Run the nesting algorithm
+    discs.sort(key=lambda x: -x[1])
     placed = []
-
-    for pad_size, dia in discs:
+    for _, dia in discs:
         r = dia / 2
         placed_successfully = False
-        # Iterate through potential positions, starting from top-left
         y = spacing_mm
         while y + dia + spacing_mm <= height_mm and not placed_successfully:
             x = spacing_mm
             while x + dia + spacing_mm <= width_mm:
-                cx = x + r
-                cy = y + r
-                # Check for collision with already placed circles
-                is_collision = False
-                for _, px, py, pr in placed:
-                    if (cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2:
-                        is_collision = True
-                        break
-                
+                cx, cy = x + r, y + r
+                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
+                if not is_collision:
+                    placed.append((None, cx, cy, r)) # pad_size isn't needed for this check
+                    placed_successfully = True
+                    break
+                x += 1
+            y += 1
+    
+    return len(placed) == len(discs)
+
+
+def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, settings):
+    """Generates and saves a single SVG file for a given material."""
+    spacing_mm = 1.0
+    discs = []
+
+    for pad in pads:
+        pad_size, qty = pad['size'], pad['qty']
+        diameter = 0
+        if material == 'felt':
+            diameter = pad_size - settings["felt_offset"]
+        elif material == 'card':
+            diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+        elif material == 'leather':
+            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+            diameter = pad_size + 2 * (3.175 + wrap)
+            diameter = round(diameter * 2) / 2
+        else:
+            continue
+        for _ in range(qty):
+            discs.append((pad_size, diameter))
+
+    discs.sort(key=lambda x: -x[1])
+    placed = []
+    for pad_size, dia in discs:
+        r = dia / 2
+        placed_successfully = False
+        y = spacing_mm
+        while y + dia + spacing_mm <= height_mm and not placed_successfully:
+            x = spacing_mm
+            while x + dia + spacing_mm <= width_mm:
+                cx, cy = x + r, y + r
+                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
                 if not is_collision:
                     placed.append((pad_size, cx, cy, r))
                     placed_successfully = True
                     break
-                x += 1 # Move to the next pixel
-            y += 1 # Move to the next row
+                x += 1
+            y += 1
 
-    # --- Drawing Logic ---
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
-    dwg.add(dwg.rect(insert=(0,0), size=('100%', '100%'), fill='white')) # Add white background
+    dwg.add(dwg.rect(insert=(0,0), size=('100%', '100%'), fill='white'))
 
     for pad_size, cx, cy, r in placed:
-        # Draw main circle
         dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=LAYER_COLORS[material], fill='none', stroke_width='0.1mm'))
 
-        # Draw center hole if applicable
         hole_dia = 0
         if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option):
             hole_dia = 3.5
@@ -407,16 +444,12 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=LAYER_COLORS['center_hole'], fill='none', stroke_width='0.1mm'))
 
-        # Add engraving text
         if material == 'leather':
             engraving_y = cy - (r - 1.0)
         else:
-            # Position engraving above the center hole or center point
             offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
             engraving_y = cy - offset_from_center
         
-        # Manually adjust y-position for vertical centering to avoid incompatible SVG attributes
-        # This is a small adjustment that visually centers the text.
         vertical_adjust = 0.7 
         
         dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
@@ -431,3 +464,4 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
+
