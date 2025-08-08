@@ -7,7 +7,7 @@ import json
 # --- Default Configuration ---
 # These values can be overridden by the user in the Options menu.
 DEFAULT_SETTINGS = {
-    "units": "in",  # "in" or "cm"
+    "units": "in",  # "in" or "mm"
     "felt_offset": 0.75,
     "card_to_felt_offset": 2.0,
     "leather_wrap_multiplier": 1.00,
@@ -124,9 +124,9 @@ class PadSVGGeneratorApp:
             if self.settings['units'] == 'in':
                 width_mm = width_val * 25.4
                 height_mm = height_val * 25.4
-            elif self.settings['units'] == 'cm':
-                width_mm = width_val * 10
-                height_mm = height_val * 10
+            elif self.settings['units'] == 'mm':
+                width_mm = width_val
+                height_mm = height_val
             else:
                 # Fallback for an unexpected unit type
                 messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
@@ -252,10 +252,10 @@ class OptionsWindow:
         unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
         unit_frame.pack(fill="x", pady=5)
         tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=10)
-        tk.Radiobutton(unit_frame, text="Centimeters (cm)", variable=self.unit_var, value="cm", bg="#F0EAD6").pack(side="left", padx=10)
+        tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=10)
 
         # Sizing Rules
-        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules", bg="#F0EAD6", padx=5, pady=5)
+        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (Advanced)", bg="#F0EAD6", padx=5, pady=5)
         rules_frame.pack(fill="x", pady=5)
         rules_frame.columnconfigure(1, weight=1)
 
