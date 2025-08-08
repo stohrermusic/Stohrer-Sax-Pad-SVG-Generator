@@ -316,27 +316,26 @@ def open_options():
     top.grab_set()
 
 # Button row with Options + Generate
-btn_row = tk.Frame(root, bg="#FFFDD0")
-btn_row.pack(pady=10)
-tk.Button(btn_row, text="Options…", command=open_options).pack(side="left", padx=6)
-tk.Button(btn_row, text="Generate SVGs", command=on_generate).pack(side="left", padx=6)
+    btn_row = tk.Frame(root, bg="#FFFDD0")
+    btn_row.pack(pady=10)
+    tk.Button(btn_row, text="Options…", command=open_options).pack(side="left", padx=6)
+    tk.Button(btn_row, text="Generate SVGs", command=on_generate).pack(side="left", padx=6)
 
+    # Presets row
+    preset_frame = tk.Frame(root, bg="#FFFDD0")
+    preset_frame.pack(pady=10)
+    tk.Button(preset_frame, text="Save Pad Sizes as Preset", command=on_save_preset).pack(side="left", padx=5)
 
-preset_frame = tk.Frame(root, bg="#FFFDD0")
-preset_frame.pack(pady=10)
-tk.Button(preset_frame, text="Save Pad Sizes as Preset", command=on_save_preset).pack(side="left", padx=5)
+    saved_presets = load_presets()
+    preset_names = list(saved_presets.keys())
+    preset_var = tk.StringVar()
+    preset_menu = ttk.Combobox(preset_frame, textvariable=preset_var, values=preset_names, state="readonly", width=20)
+    preset_menu.set("Load Preset")
+    preset_menu.pack(side="left", padx=5)
+    preset_menu.bind("<<ComboboxSelected>>", lambda e: on_load_preset(preset_var.get()))
+    tk.Button(preset_frame, text="Delete Preset", command=on_delete_preset).pack(side="left", padx=5)
 
-saved_presets = load_presets()
-preset_names = list(saved_presets.keys())
-preset_var = tk.StringVar()
-preset_menu = ttk.Combobox(preset_frame, textvariable=preset_var, values=preset_names, state="readonly", width=20)
-preset_menu.set("Load Preset")
-preset_menu.pack(side="left", padx=5)
-preset_menu.bind("<<ComboboxSelected>>", lambda e: on_load_preset(preset_var.get()))
-
-tk.Button(preset_frame, text="Delete Preset", command=on_delete_preset).pack(side="left", padx=5)
-
-root.mainloop()
+    root.mainloop()
 
 if __name__ == '__main__':
     launch_gui()
