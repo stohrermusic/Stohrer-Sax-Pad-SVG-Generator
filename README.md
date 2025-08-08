@@ -12,7 +12,7 @@ You will need to apply your own feeds/speeds and kerf settings depending on your
 
 Make sure to enter the pad sizes like it suggests, e.g. "34.0 x 10" without the quotes, and each size on a different line.  If you use a comma rather than a decimal point, the value will be ignored.  
 
-Windows is the intended OS for using this program.  Click on "releases" and download the exe. https://github.com/stohrermusic/Stohrer-Sax-Pad-SVG-Generator/releases/tag/saxophone
+Windows is the intended OS for using this program.  Click on "releases" and download the exe. 
 
 If you wish to run this in linux with python3, you must also install python3-svgwrite and python3-tk, but I can provide no technical support.
 
