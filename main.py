@@ -14,6 +14,7 @@ DEFAULT_SETTINGS = {
     "sheet_width": "13.5",
     "sheet_height": "10",
     "hole_option": "3.5mm",
+    "min_hole_size": 16.5,
 }
 
 LAYER_COLORS = {
@@ -29,7 +30,7 @@ SETTINGS_FILE = "app_settings.json" # File to store user settings
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Stohrer Sax Pad SVG Generator v1.2")
+        self.root.title("Stohrer Sax Pad SVG Generator v2")
         self.root.geometry("620x620")
         self.root.configure(bg="#FFFDD0")
 
@@ -283,7 +284,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Options")
-        self.top.geometry("450x250")
+        self.top.geometry("450x280")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -292,6 +293,7 @@ class OptionsWindow:
         self.felt_offset_var = tk.DoubleVar(value=self.settings["felt_offset"])
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
         self.leather_mult_var = tk.DoubleVar(value=self.settings["leather_wrap_multiplier"])
+        self.min_hole_size_var = tk.DoubleVar(value=self.settings["min_hole_size"])
 
         main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
         main_frame.pack(fill="both", expand=True)
@@ -315,6 +317,9 @@ class OptionsWindow:
         tk.Label(rules_frame, text="Leather Wrap Multiplier (1.00=default):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.leather_mult_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
+        tk.Label(rules_frame, text="Min. Pad Size for Hole (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
+        tk.Entry(rules_frame, textvariable=self.min_hole_size_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
+
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
         tk.Button(button_frame, text="Save", command=self.save_options).pack(side="left", padx=10)
@@ -327,6 +332,7 @@ class OptionsWindow:
         self.settings["felt_offset"] = self.felt_offset_var.get()
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
         self.settings["leather_wrap_multiplier"] = self.leather_mult_var.get()
+        self.settings["min_hole_size"] = self.min_hole_size_var.get()
         
         self.save_callback()
         self.update_callback()
@@ -339,6 +345,7 @@ class OptionsWindow:
             self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
             self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
             self.leather_mult_var.set(DEFAULT_SETTINGS["leather_wrap_multiplier"])
+            self.min_hole_size_var.set(DEFAULT_SETTINGS["min_hole_size"])
 
 # --- Core SVG Generation Logic (outside the GUI class) ---
 
@@ -355,9 +362,10 @@ def leather_back_wrap(pad_size, multiplier):
         base_wrap = 3.5
     return base_wrap * multiplier
 
-def should_have_center_hole(pad_size, hole_option):
+def should_have_center_hole(pad_size, hole_option, settings):
     """Determines if a pad of a given size should have a center hole."""
-    return hole_option != "No center holes" and pad_size >= 16.5
+    min_size = settings.get("min_hole_size", 16.5) # Use .get for safety
+    return hole_option != "No center holes" and pad_size >= min_size
 
 def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     """
@@ -444,15 +452,14 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
             y += 1
 
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
-    # Removed the white background rectangle to prevent the extra layer bug
 
     for pad_size, cx, cy, r in placed:
         dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=LAYER_COLORS[material], fill='none', stroke_width='0.1mm'))
 
         hole_dia = 0
-        if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option):
+        if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings):
             hole_dia = 3.5
-        elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option):
+        elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings):
             hole_dia = 3.0
 
         if hole_dia > 0:
@@ -478,4 +485,3 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
-
