@@ -380,11 +380,14 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
             # Position engraving above the center hole or center point
             offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
             engraving_y = cy - offset_from_center
-
+        
+        # Manually adjust y-position for vertical centering to avoid incompatible SVG attributes
+        # This is a small adjustment that visually centers the text.
+        vertical_adjust = 0.7 
+        
         dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
-                         insert=(f"{cx}mm", f"{engraving_y}mm"),
+                         insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
                          text_anchor="middle",
-                         dominant_baseline="middle",  # <-- CORRECTED ATTRIBUTE
                          font_size="2mm",
                          fill=LAYER_COLORS['engraving']))
 
