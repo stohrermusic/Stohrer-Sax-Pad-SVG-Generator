@@ -7,10 +7,13 @@ import json
 # --- Default Configuration ---
 # These values are used if no settings file is found.
 DEFAULT_SETTINGS = {
-    "units": "in",  # "in" or "mm"
+    "units": "in",  # "in", "cm", or "mm"
     "felt_offset": 0.75,
     "card_to_felt_offset": 2.0,
     "leather_wrap_multiplier": 1.00,
+    "sheet_width": "13.5",
+    "sheet_height": "10",
+    "hole_option": "3.5mm",
 }
 
 LAYER_COLORS = {
@@ -36,6 +39,18 @@ class PadSVGGeneratorApp:
 
         self.create_widgets()
         self.create_menu()
+        
+        # Set the custom close behavior
+        self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
+
+    def on_exit(self):
+        """Saves settings and closes the application."""
+        # Update settings with the latest values from the UI
+        self.settings["sheet_width"] = self.width_entry.get()
+        self.settings["sheet_height"] = self.height_entry.get()
+        self.settings["hole_option"] = self.hole_var.get()
+        self.save_settings()
+        self.root.destroy()
 
     def load_settings(self):
         """Loads app settings from a JSON file, falling back to defaults."""
@@ -68,7 +83,7 @@ class PadSVGGeneratorApp:
         menubar.add_cascade(label="Options", menu=options_menu)
         options_menu.add_command(label="Adjust Rules...", command=self.open_options_window)
         options_menu.add_separator()
-        options_menu.add_command(label="Exit", command=self.root.quit)
+        options_menu.add_command(label="Exit", command=self.on_exit)
 
     def create_widgets(self):
         """Creates all the main widgets for the application window."""
@@ -105,19 +120,19 @@ class PadSVGGeneratorApp:
         options_frame.columnconfigure(3, weight=1)
 
         tk.Label(options_frame, text="Center hole:", bg="#FFFDD0").grid(row=0, column=0, sticky='w', padx=5)
-        self.hole_var = tk.StringVar(value="3.5mm")
+        self.hole_var = tk.StringVar(value=self.settings["hole_option"])
         tk.OptionMenu(options_frame, self.hole_var, "No center holes", "3.5mm", "3.0mm").grid(row=0, column=1, sticky='w')
 
         self.unit_label = tk.Label(options_frame, text=f"Sheet width ({self.settings['units']}):", bg="#FFFDD0")
         self.unit_label.grid(row=1, column=0, sticky='w', padx=5)
         self.width_entry = tk.Entry(options_frame)
-        self.width_entry.insert(0, "13.5")
+        self.width_entry.insert(0, self.settings["sheet_width"])
         self.width_entry.grid(row=1, column=1, sticky='ew')
 
         self.height_label = tk.Label(options_frame, text=f"Sheet height ({self.settings['units']}):", bg="#FFFDD0")
         self.height_label.grid(row=2, column=0, sticky='w', padx=5)
         self.height_entry = tk.Entry(options_frame)
-        self.height_entry.insert(0, "10")
+        self.height_entry.insert(0, self.settings["sheet_height"])
         self.height_entry.grid(row=2, column=1, sticky='ew')
 
         # --- Filename and Generate Button ---
@@ -147,6 +162,9 @@ class PadSVGGeneratorApp:
             if self.settings['units'] == 'in':
                 width_mm = width_val * 25.4
                 height_mm = height_val * 25.4
+            elif self.settings['units'] == 'cm':
+                width_mm = width_val * 10
+                height_mm = height_val * 10
             elif self.settings['units'] == 'mm':
                 width_mm = width_val
                 height_mm = height_val
@@ -164,7 +182,6 @@ class PadSVGGeneratorApp:
                 messagebox.showerror("Error", "Please enter a base filename.")
                 return
             
-            # --- PRE-CHECK: Verify all materials can fit before generating any files ---
             for material, var in self.material_vars.items():
                 if var.get():
                     if not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
@@ -174,14 +191,12 @@ class PadSVGGeneratorApp:
                             "Please increase the sheet dimensions or reduce the number of pads.\n\n"
                             "No SVG files will be generated."
                         )
-                        return # Abort the entire operation
+                        return
 
-            # If the pre-check passes, proceed with generation
             save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
             if not save_dir:
                 return
 
-            # Loop through and generate files
             files_generated = False
             for material, var in self.material_vars.items():
                 if var.get():
@@ -192,7 +207,7 @@ class PadSVGGeneratorApp:
             if files_generated:
                 messagebox.showinfo("Done", "SVGs generated successfully.")
             else:
-                messagebox.showwarning("No Materials Selected", "Please select at least one material (felt, card, leather) to generate files.")
+                messagebox.showwarning("No Materials Selected", "Please select at least one material to generate files.")
 
         except Exception as e:
             print(f"An error occurred during SVG generation: {e}")
@@ -283,8 +298,9 @@ class OptionsWindow:
 
         unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
         unit_frame.pack(fill="x", pady=5)
-        tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=10)
-        tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=10)
+        tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=5)
+        tk.Radiobutton(unit_frame, text="Centimeters (cm)", variable=self.unit_var, value="cm", bg="#F0EAD6").pack(side="left", padx=5)
+        tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=5)
 
         rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (Advanced)", bg="#F0EAD6", padx=5, pady=5)
         rules_frame.pack(fill="x", pady=5)
@@ -351,7 +367,6 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     spacing_mm = 1.0
     discs = []
     
-    # Calculate diameters for all discs
     for pad in pads:
         pad_size, qty = pad['size'], pad['qty']
         diameter = 0
@@ -368,7 +383,6 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
         for _ in range(qty):
             discs.append((pad_size, diameter))
 
-    # Run the nesting algorithm
     discs.sort(key=lambda x: -x[1])
     placed = []
     for _, dia in discs:
@@ -381,7 +395,7 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
                 cx, cy = x + r, y + r
                 is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
                 if not is_collision:
-                    placed.append((None, cx, cy, r)) # pad_size isn't needed for this check
+                    placed.append((None, cx, cy, r))
                     placed_successfully = True
                     break
                 x += 1
@@ -430,7 +444,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
             y += 1
 
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
-    dwg.add(dwg.rect(insert=(0,0), size=('100%', '100%'), fill='white'))
+    # Removed the white background rectangle to prevent the extra layer bug
 
     for pad_size, cx, cy, r in placed:
         dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=LAYER_COLORS[material], fill='none', stroke_width='0.1mm'))
