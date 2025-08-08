@@ -7,10 +7,10 @@ import json
 # --- Default Configuration ---
 # These values can be overridden by the user in the Options menu.
 DEFAULT_SETTINGS = {
-    "units": "in",  # "in" or "mm"
+    "units": "in",  # "in" or "cm"
     "felt_offset": 0.75,
     "card_to_felt_offset": 2.0,
-    "leather_wrap_multiplier": 1.0,
+    "leather_wrap_multiplier": 1.00,
 }
 
 LAYER_COLORS = {
@@ -26,7 +26,7 @@ class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Stohrer Sax Pad SVG Generator v2")
-        self.root.geometry("620x600")
+        self.root.geometry("620x620")
         self.root.configure(bg="#FFFDD0")
 
         # Load settings and presets
@@ -37,19 +37,15 @@ class PadSVGGeneratorApp:
         self.create_menu()
 
     def create_menu(self):
-        """Creates the main menu bar with File and Options."""
+        """Creates the main menu bar with Options."""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
-
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Save Pad Sizes as Preset", command=self.on_save_preset)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
 
         options_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Options", menu=options_menu)
         options_menu.add_command(label="Adjust Rules...", command=self.open_options_window)
+        options_menu.add_separator()
+        options_menu.add_command(label="Exit", command=self.root.quit)
 
     def create_widgets(self):
         """Creates all the main widgets for the application window."""
@@ -58,13 +54,15 @@ class PadSVGGeneratorApp:
         self.pad_entry = tk.Text(self.root, height=10)
         self.pad_entry.pack(fill="x", padx=10)
 
-        # --- Preset Loading Section ---
+        # --- Preset Management Section ---
         preset_frame = tk.Frame(self.root, bg="#FFFDD0")
-        preset_frame.pack(pady=5)
+        preset_frame.pack(pady=10)
+        
+        tk.Button(preset_frame, text="Save as Preset", command=self.on_save_preset).pack(side="left", padx=5)
         
         preset_names = list(self.presets.keys())
         self.preset_var = tk.StringVar()
-        self.preset_menu = ttk.Combobox(preset_frame, textvariable=self.preset_var, values=preset_names, state="readonly", width=25)
+        self.preset_menu = ttk.Combobox(preset_frame, textvariable=self.preset_var, values=preset_names, state="readonly", width=20)
         self.preset_menu.set("Load Preset")
         self.preset_menu.pack(side="left", padx=5)
         self.preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_preset(self.preset_var.get()))
@@ -122,9 +120,17 @@ class PadSVGGeneratorApp:
             width_val = float(self.width_entry.get())
             height_val = float(self.height_entry.get())
             
-            # Convert to mm if units are inches
-            width_mm = width_val * 25.4 if self.settings['units'] == 'in' else width_val
-            height_mm = height_val * 25.4 if self.settings['units'] == 'in' else height_val
+            # Convert to mm based on selected units
+            if self.settings['units'] == 'in':
+                width_mm = width_val * 25.4
+                height_mm = height_val * 25.4
+            elif self.settings['units'] == 'cm':
+                width_mm = width_val * 10
+                height_mm = height_val * 10
+            else: # units are mm
+                width_mm = width_val
+                height_mm = height_val
+
 
         except ValueError:
             messagebox.showerror("Error", "Invalid sheet dimensions. Please enter numeric values.")
@@ -219,7 +225,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Options")
-        self.top.geometry("400x250")
+        self.top.geometry("450x250")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -238,20 +244,20 @@ class OptionsWindow:
         unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
         unit_frame.pack(fill="x", pady=5)
         tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=10)
-        tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=10)
+        tk.Radiobutton(unit_frame, text="Centimeters (cm)", variable=self.unit_var, value="cm", bg="#F0EAD6").pack(side="left", padx=10)
 
         # Sizing Rules
-        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules", bg="#F0EAD6", padx=5, pady=5)
+        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (enter positive values for reduction)", bg="#F0EAD6", padx=5, pady=5)
         rules_frame.pack(fill="x", pady=5)
         rules_frame.columnconfigure(1, weight=1)
 
-        tk.Label(rules_frame, text="Felt Offset (mm):", bg="#F0EAD6").grid(row=0, column=0, sticky='w', pady=2)
+        tk.Label(rules_frame, text="Felt Diameter Reduction (mm):", bg="#F0EAD6").grid(row=0, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.felt_offset_var, width=10).grid(row=0, column=1, sticky='w', pady=2)
 
-        tk.Label(rules_frame, text="Card Offset from Felt (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Label(rules_frame, text="Card Additional Reduction (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.card_offset_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
 
-        tk.Label(rules_frame, text="Leather Wrap Multiplier:", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Label(rules_frame, text="Leather Wrap Multiplier (1.00=default):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.leather_mult_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
         # --- Save/Cancel Buttons ---
