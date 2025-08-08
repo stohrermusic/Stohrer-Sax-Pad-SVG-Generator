@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
 
 # --- Default Configuration ---
-# These values can be overridden by the user in the Options menu.
+# These values are used if no settings file is found.
 DEFAULT_SETTINGS = {
     "units": "in",  # "in" or "mm"
     "felt_offset": 0.75,
@@ -21,6 +21,7 @@ LAYER_COLORS = {
     'engraving': 'orange'
 }
 PRESET_FILE = "pad_presets.json"
+SETTINGS_FILE = "app_settings.json" # File to store user settings
 
 class PadSVGGeneratorApp:
     def __init__(self, root):
@@ -30,11 +31,33 @@ class PadSVGGeneratorApp:
         self.root.configure(bg="#FFFDD0")
 
         # Load settings and presets
-        self.settings = DEFAULT_SETTINGS.copy()
+        self.settings = self.load_settings()
         self.presets = self.load_presets()
 
         self.create_widgets()
         self.create_menu()
+
+    def load_settings(self):
+        """Loads app settings from a JSON file, falling back to defaults."""
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r') as f:
+                    # Make sure all default keys are present
+                    loaded_settings = json.load(f)
+                    settings = DEFAULT_SETTINGS.copy()
+                    settings.update(loaded_settings)
+                    return settings
+            except (json.JSONDecodeError, TypeError):
+                return DEFAULT_SETTINGS.copy()
+        return DEFAULT_SETTINGS.copy()
+
+    def save_settings(self):
+        """Saves the current settings to a JSON file."""
+        try:
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception as e:
+            messagebox.showerror("Error Saving Settings", f"Could not save settings:\n{e}")
 
     def create_menu(self):
         """Creates the main menu bar with Options."""
@@ -107,7 +130,7 @@ class PadSVGGeneratorApp:
 
     def open_options_window(self):
         """Opens a new window to configure advanced settings."""
-        OptionsWindow(self.root, self.settings, self.update_ui_from_settings)
+        OptionsWindow(self.root, self.settings, self.update_ui_from_settings, self.save_settings)
 
     def update_ui_from_settings(self):
         """Updates the main GUI labels if settings (like units) change."""
@@ -227,9 +250,10 @@ class PadSVGGeneratorApp:
                     messagebox.showerror("Error Deleting Preset", str(e))
 
 class OptionsWindow:
-    def __init__(self, parent, settings, update_callback):
+    def __init__(self, parent, settings, update_callback, save_callback):
         self.settings = settings
         self.update_callback = update_callback
+        self.save_callback = save_callback
         
         self.top = tk.Toplevel(parent)
         self.top.title("Options")
@@ -268,11 +292,12 @@ class OptionsWindow:
         tk.Label(rules_frame, text="Leather Wrap Multiplier (1.00=default):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.leather_mult_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
-        # --- Save/Cancel Buttons ---
+        # --- Save/Cancel/Default Buttons ---
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
-        button_frame.pack(side="bottom", pady=10)
+        button_frame.pack(side="bottom", pady=10, fill='x')
         tk.Button(button_frame, text="Save", command=self.save_options).pack(side="left", padx=10)
         tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
+        tk.Button(button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=10)
 
     def save_options(self):
         """Saves the current options and closes the window."""
@@ -281,8 +306,17 @@ class OptionsWindow:
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
         self.settings["leather_wrap_multiplier"] = self.leather_mult_var.get()
         
+        self.save_callback() # Save settings to file
         self.update_callback() # Update the main UI
         self.top.destroy()
+
+    def revert_to_defaults(self):
+        """Resets the options in the window to their default values."""
+        if messagebox.askyesno("Revert to Defaults", "Are you sure you want to revert all settings to their original defaults?"):
+            self.unit_var.set(DEFAULT_SETTINGS["units"])
+            self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
+            self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
+            self.leather_mult_var.set(DEFAULT_SETTINGS["leather_wrap_multiplier"])
 
 # --- Core SVG Generation Logic (outside the GUI class) ---
 
