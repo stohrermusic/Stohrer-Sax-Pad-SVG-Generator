@@ -319,7 +319,7 @@ def open_options():
 btn_row = tk.Frame(root, bg="#FFFDD0")
 btn_row.pack(pady=10)
 tk.Button(btn_row, text="Options…", command=open_options).pack(side="left", padx=6)
-    tk.Button(btn_row, text="Generate SVGs", command=on_generate).pack(side="left", padx=6)
+tk.Button(btn_row, text="Generate SVGs", command=on_generate).pack(side="left", padx=6)
 
 
     preset_frame = tk.Frame(root, bg="#FFFDD0")
