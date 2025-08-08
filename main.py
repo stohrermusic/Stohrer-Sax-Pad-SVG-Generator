@@ -115,7 +115,7 @@ class PadSVGGeneratorApp:
         self.height_label.config(text=f"Sheet height ({self.settings['units']}):")
 
     def on_generate(self):
-        """Handles the main SVG generation process."""
+        """Handles the main SVG generation process with robust error handling."""
         try:
             width_val = float(self.width_entry.get())
             height_val = float(self.height_entry.get())
@@ -127,35 +127,42 @@ class PadSVGGeneratorApp:
             elif self.settings['units'] == 'cm':
                 width_mm = width_val * 10
                 height_mm = height_val * 10
-            else: # units are mm
+            else:
+                # This case should not be reached with the current UI, but is here for safety
+                messagebox.showwarning("Warning", f"Unknown unit '{self.settings['units']}'. Assuming mm.")
                 width_mm = width_val
                 height_mm = height_val
 
+            pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
+            if not pads:
+                messagebox.showerror("Error", "No valid pad sizes entered.")
+                return
 
-        except ValueError:
-            messagebox.showerror("Error", "Invalid sheet dimensions. Please enter numeric values.")
-            return
+            base = self.filename_entry.get().strip()
+            if not base:
+                messagebox.showerror("Error", "Please enter a base filename.")
+                return
+                
+            save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
+            if not save_dir:
+                return
 
-        pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
-        if not pads:
-            messagebox.showerror("Error", "No valid pad sizes entered.")
-            return
-
-        base = self.filename_entry.get().strip()
-        if not base:
-            messagebox.showerror("Error", "Please enter a base filename.")
-            return
+            # Loop through and generate files
+            files_generated = False
+            for material, var in self.material_vars.items():
+                if var.get():
+                    filename = os.path.join(save_dir, f"{base}_{material}.svg")
+                    generate_svg(pads, material, width_mm, height_mm, filename, self.hole_var.get(), self.settings)
+                    files_generated = True
             
-        save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
-        if not save_dir:
+            if files_generated:
+                messagebox.showinfo("Done", "SVGs generated successfully.")
+            else:
+                messagebox.showwarning("No Materials Selected", "Please select at least one material (felt, card, leather) to generate files.")
+
+        except Exception as e:
+            messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
             return
-
-        for material, var in self.material_vars.items():
-            if var.get():
-                filename = os.path.join(save_dir, f"{base}_{material}.svg")
-                generate_svg(pads, material, width_mm, height_mm, filename, self.hole_var.get(), self.settings)
-
-        messagebox.showinfo("Done", "SVGs generated successfully.")
 
     def parse_pad_list(self, pad_input):
         """Parses the text input for pad sizes and quantities."""
