@@ -29,11 +29,14 @@ DEFAULT_SETTINGS = {
     "hole_option": "3.5mm",
     "min_hole_size": 16.5,
     "layer_colors": {
-        'felt': '#000000',      # Default to Black (00)
-        'card': '#0000FF',      # Default to Blue (01)
-        'leather': '#FF0000',   # Default to Red (02)
-        'center_hole': '#808080', # Default to Gray (16)
-        'engraving': '#FF8000'  # Default to Orange (05)
+        'felt_outline': '#000000',      # Black
+        'felt_center_hole': '#0000A0',  # Dark Blue
+        'felt_engraving': '#A00000',    # Dark Red
+        'card_outline': '#0000FF',      # Blue
+        'card_center_hole': '#00A0FF',  # Light Blue
+        'card_engraving': '#A000A0',    # Dark Magenta
+        'leather_outline': '#FF0000',   # Red
+        'leather_engraving': '#FF8000'  # Orange
     }
 }
 
@@ -70,7 +73,7 @@ class PadSVGGeneratorApp:
                     settings = DEFAULT_SETTINGS.copy()
                     # Deep update for nested dictionaries like layer_colors
                     for key, value in loaded_settings.items():
-                        if isinstance(value, dict):
+                        if key in settings and isinstance(settings[key], dict) and isinstance(value, dict):
                             settings[key].update(value)
                         else:
                             settings[key] = value
@@ -266,7 +269,6 @@ class PadSVGGeneratorApp:
                     messagebox.showerror("Error Deleting Preset", str(e))
 
 class OptionsWindow:
-    # ... (This class remains the same as the previous version)
     def __init__(self, parent, settings, update_callback, save_callback):
         self.settings = settings
         self.update_callback = update_callback
@@ -342,16 +344,13 @@ class LayerColorWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Layer Color Mapping")
-        self.top.geometry("400x250")
+        self.top.geometry("450x350")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
 
-        # Create a mapping from color name to hex value for the combobox
         self.color_map = {name: hex_val for name, hex_val in LIGHTBURN_COLORS}
         color_names = list(self.color_map.keys())
-
-        # Create a reverse map to find the name from a hex value
         self.hex_to_name_map = {hex_val: name for name, hex_val in LIGHTBURN_COLORS}
 
         self.color_vars = {}
@@ -360,31 +359,34 @@ class LayerColorWindow:
         main_frame.pack(fill="both", expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        # Create a dropdown for each layer type
-        layer_types = ['felt', 'card', 'leather', 'center_hole', 'engraving']
-        for i, layer in enumerate(layer_types):
-            tk.Label(main_frame, text=f"{layer.replace('_', ' ').capitalize()}:", bg="#F0EAD6").grid(row=i, column=0, sticky='w', pady=5)
+        layer_map_keys = [
+            'felt_outline', 'felt_center_hole', 'felt_engraving',
+            'card_outline', 'card_center_hole', 'card_engraving',
+            'leather_outline', 'leather_engraving'
+        ]
+        
+        for i, key in enumerate(layer_map_keys):
+            label_text = key.replace('_', ' ').capitalize() + ":"
+            tk.Label(main_frame, text=label_text, bg="#F0EAD6").grid(row=i, column=0, sticky='w', pady=3)
             
             var = tk.StringVar()
-            # Find the current color name from the saved hex value
-            current_hex = self.settings["layer_colors"].get(layer, "#000000")
+            current_hex = self.settings["layer_colors"].get(key, "#000000")
             current_name = self.hex_to_name_map.get(current_hex, color_names[0])
             var.set(current_name)
             
             combo = ttk.Combobox(main_frame, textvariable=var, values=color_names, state="readonly")
             combo.grid(row=i, column=1, sticky='ew', padx=5)
-            self.color_vars[layer] = var
+            self.color_vars[key] = var
 
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
-        button_frame.grid(row=len(layer_types), column=0, columnspan=2, pady=20)
+        button_frame.grid(row=len(layer_map_keys), column=0, columnspan=2, pady=20)
         tk.Button(button_frame, text="Save", command=self.save_colors).pack(side="left", padx=10)
         tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
 
     def save_colors(self):
-        """Saves the selected colors to the settings and closes the window."""
-        for layer, var in self.color_vars.items():
+        for key, var in self.color_vars.items():
             selected_name = var.get()
-            self.settings["layer_colors"][layer] = self.color_map[selected_name]
+            self.settings["layer_colors"][key] = self.color_map[selected_name]
         
         self.save_callback()
         self.top.destroy()
@@ -477,19 +479,22 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
     layer_colors = settings.get("layer_colors", DEFAULT_SETTINGS["layer_colors"])
 
     for pad_size, cx, cy, r in placed:
-        dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[material], fill='none', stroke_width='0.1mm'))
+        dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width='0.1mm'))
 
         hole_dia = 0
         if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.5
         elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.0
 
-        if hole_dia > 0:
-            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors['center_hole'], fill='none', stroke_width='0.1mm'))
+        if hole_dia > 0 and material != 'leather':
+            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
-        if material == 'leather': engraving_y = cy - (r - 1.0)
+        if material == 'leather': 
+            engraving_y = cy - (r - 1.0)
+            engraving_color = layer_colors['leather_engraving']
         else:
             offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
             engraving_y = cy - offset_from_center
+            engraving_color = layer_colors[f'{material}_engraving']
         
         vertical_adjust = 0.7 
         
@@ -497,7 +502,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
                          insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
                          text_anchor="middle",
                          font_size="2mm",
-                         fill=layer_colors['engraving']))
+                         fill=engraving_color))
 
     dwg.save()
 
