@@ -4,10 +4,23 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
 
+# --- Lightburn Color Palette ---
+LIGHTBURN_COLORS = [
+    ("00 - Black", "#000000"), ("01 - Blue", "#0000FF"), ("02 - Red", "#FF0000"),
+    ("03 - Green", "#00E000"), ("04 - Yellow", "#D0D000"), ("05 - Orange", "#FF8000"),
+    ("06 - Cyan", "#00E0E0"), ("07 - Magenta", "#FF00FF"), ("08 - Light Gray", "#B4B4B4"),
+    ("09 - Dark Blue", "#0000A0"), ("10 - Dark Red", "#A00000"), ("11 - Dark Green", "#00A000"),
+    ("12 - Dark Yellow", "#A0A000"), ("13 - Brown", "#C08000"), ("14 - Light Blue", "#00A0FF"),
+    ("15 - Dark Magenta", "#A000A0"), ("16 - Gray", "#808080"), ("17 - Periwinkle", "#7D87B9"),
+    ("18 - Rose", "#BB7784"), ("19 - Cornflower", "#4A6FE3"), ("20 - Cerise", "#D33F6A"),
+    ("21 - Light Green", "#8CD78C"), ("22 - Tan", "#F0B98D"), ("23 - Pink", "#F6C4E1"),
+    ("24 - Lavender", "#FA9ED4"), ("25 - Purple", "#500A78"), ("26 - Ochre", "#B45A00"),
+    ("27 - Teal", "#004754"), ("28 - Mint", "#86FA88"), ("29 - Pale Yellow", "#FFDB66")
+]
+
 # --- Default Configuration ---
-# These values are used if no settings file is found.
 DEFAULT_SETTINGS = {
-    "units": "in",  # "in", "cm", or "mm"
+    "units": "in",
     "felt_offset": 0.75,
     "card_to_felt_offset": 2.0,
     "leather_wrap_multiplier": 1.00,
@@ -15,38 +28,34 @@ DEFAULT_SETTINGS = {
     "sheet_height": "10",
     "hole_option": "3.5mm",
     "min_hole_size": 16.5,
+    "layer_colors": {
+        'felt': '#000000',      # Default to Black (00)
+        'card': '#0000FF',      # Default to Blue (01)
+        'leather': '#FF0000',   # Default to Red (02)
+        'center_hole': '#808080', # Default to Gray (16)
+        'engraving': '#FF8000'  # Default to Orange (05)
+    }
 }
 
-LAYER_COLORS = {
-    'felt': 'black',
-    'card': 'blue',
-    'leather': 'red',
-    'center_hole': 'dimgray',
-    'engraving': 'orange'
-}
 PRESET_FILE = "pad_presets.json"
-SETTINGS_FILE = "app_settings.json" # File to store user settings
+SETTINGS_FILE = "app_settings.json"
 
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Stohrer Sax Pad SVG Generator v2")
+        self.root.title("Sax Pad SVG Generator (Phil's Edition)")
         self.root.geometry("620x620")
         self.root.configure(bg="#FFFDD0")
 
-        # Load settings and presets
         self.settings = self.load_settings()
         self.presets = self.load_presets()
 
         self.create_widgets()
         self.create_menu()
         
-        # Set the custom close behavior
         self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
 
     def on_exit(self):
-        """Saves settings and closes the application."""
-        # Update settings with the latest values from the UI
         self.settings["sheet_width"] = self.width_entry.get()
         self.settings["sheet_height"] = self.height_entry.get()
         self.settings["hole_option"] = self.hole_var.get()
@@ -54,21 +63,23 @@ class PadSVGGeneratorApp:
         self.root.destroy()
 
     def load_settings(self):
-        """Loads app settings from a JSON file, falling back to defaults."""
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r') as f:
-                    # Make sure all default keys are present
                     loaded_settings = json.load(f)
                     settings = DEFAULT_SETTINGS.copy()
-                    settings.update(loaded_settings)
+                    # Deep update for nested dictionaries like layer_colors
+                    for key, value in loaded_settings.items():
+                        if isinstance(value, dict):
+                            settings[key].update(value)
+                        else:
+                            settings[key] = value
                     return settings
             except (json.JSONDecodeError, TypeError):
                 return DEFAULT_SETTINGS.copy()
         return DEFAULT_SETTINGS.copy()
 
     def save_settings(self):
-        """Saves the current settings to a JSON file."""
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(self.settings, f, indent=2)
@@ -76,24 +87,21 @@ class PadSVGGeneratorApp:
             messagebox.showerror("Error Saving Settings", f"Could not save settings:\n{e}")
 
     def create_menu(self):
-        """Creates the main menu bar with Options."""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
         options_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Options", menu=options_menu)
-        options_menu.add_command(label="Adjust Rules...", command=self.open_options_window)
+        options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
+        options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
         options_menu.add_separator()
         options_menu.add_command(label="Exit", command=self.on_exit)
 
     def create_widgets(self):
-        """Creates all the main widgets for the application window."""
-        # --- Pad Input Section ---
         tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
         self.pad_entry = tk.Text(self.root, height=10)
         self.pad_entry.pack(fill="x", padx=10)
 
-        # --- Preset Management Section ---
         preset_frame = tk.Frame(self.root, bg="#FFFDD0")
         preset_frame.pack(pady=10)
         
@@ -108,13 +116,11 @@ class PadSVGGeneratorApp:
         
         tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_preset).pack(side="left", padx=5)
 
-        # --- Material Selection ---
         tk.Label(self.root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
         self.material_vars = {'felt': tk.BooleanVar(value=True), 'card': tk.BooleanVar(value=True), 'leather': tk.BooleanVar(value=True)}
         for m in self.material_vars:
             tk.Checkbutton(self.root, text=m.capitalize(), variable=self.material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
 
-        # --- Options Section ---
         options_frame = tk.Frame(self.root, bg="#FFFDD0")
         options_frame.pack(pady=10, fill='x', padx=10)
         options_frame.columnconfigure(1, weight=1)
@@ -136,7 +142,6 @@ class PadSVGGeneratorApp:
         self.height_entry.insert(0, self.settings["sheet_height"])
         self.height_entry.grid(row=2, column=1, sticky='ew')
 
-        # --- Filename and Generate Button ---
         tk.Label(self.root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
         self.filename_entry = tk.Entry(self.root)
         self.filename_entry.insert(0, "my_pad_job")
@@ -145,30 +150,26 @@ class PadSVGGeneratorApp:
         tk.Button(self.root, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
 
     def open_options_window(self):
-        """Opens a new window to configure advanced settings."""
         OptionsWindow(self.root, self.settings, self.update_ui_from_settings, self.save_settings)
 
+    def open_color_window(self):
+        LayerColorWindow(self.root, self.settings, self.save_settings)
+
     def update_ui_from_settings(self):
-        """Updates the main GUI labels if settings (like units) change."""
         self.unit_label.config(text=f"Sheet width ({self.settings['units']}):")
         self.height_label.config(text=f"Sheet height ({self.settings['units']}):")
 
     def on_generate(self):
-        """Handles the main SVG generation process with robust error handling."""
         try:
             width_val = float(self.width_entry.get())
             height_val = float(self.height_entry.get())
             
-            # Convert to mm based on selected units
             if self.settings['units'] == 'in':
-                width_mm = width_val * 25.4
-                height_mm = height_val * 25.4
+                width_mm, height_mm = width_val * 25.4, height_val * 25.4
             elif self.settings['units'] == 'cm':
-                width_mm = width_val * 10
-                height_mm = height_val * 10
+                width_mm, height_mm = width_val * 10, height_val * 10
             elif self.settings['units'] == 'mm':
-                width_mm = width_val
-                height_mm = height_val
+                width_mm, height_mm = width_val, height_val
             else:
                 messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
                 return
@@ -184,20 +185,13 @@ class PadSVGGeneratorApp:
                 return
             
             for material, var in self.material_vars.items():
-                if var.get():
-                    if not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
-                        messagebox.showerror(
-                            "Nesting Error",
-                            f"Could not fit all '{material}' pieces on the specified sheet size.\n\n"
-                            "Please increase the sheet dimensions or reduce the number of pads.\n\n"
-                            "No SVG files will be generated."
-                        )
-                        return
+                if var.get() and not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
+                    messagebox.showerror("Nesting Error", f"Could not fit all '{material}' pieces on the specified sheet size.")
+                    return
 
             save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
             if not save_dir:
                 return
-
 
             files_generated = False
             for material, var in self.material_vars.items():
@@ -209,15 +203,13 @@ class PadSVGGeneratorApp:
             if files_generated:
                 messagebox.showinfo("Done", "SVGs generated successfully.")
             else:
-                messagebox.showwarning("No Materials Selected", "Please select at least one material to generate files.")
+                messagebox.showwarning("No Materials Selected", "Please select at least one material.")
 
         except Exception as e:
             print(f"An error occurred during SVG generation: {e}")
             messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
-            return
 
     def parse_pad_list(self, pad_input):
-        """Parses the text input for pad sizes and quantities."""
         pad_list = []
         for line in pad_input.strip().splitlines():
             try:
@@ -228,7 +220,6 @@ class PadSVGGeneratorApp:
         return pad_list
 
     def load_presets(self):
-        """Loads pad presets from a JSON file."""
         if os.path.exists(PRESET_FILE):
             try:
                 with open(PRESET_FILE, 'r') as f:
@@ -238,8 +229,6 @@ class PadSVGGeneratorApp:
         return {}
 
     def on_save_preset(self):
-        """Saves the current pad list as a named preset."""
-
         name = simpledialog.askstring("Save Preset", "Enter a name for this preset:")
         if name:
             pad_text = self.pad_entry.get("1.0", tk.END)
@@ -257,13 +246,11 @@ class PadSVGGeneratorApp:
                 messagebox.showerror("Error Saving Preset", str(e))
 
     def on_load_preset(self, selected_name):
-        """Loads a selected preset into the text entry."""
         if selected_name in self.presets:
             self.pad_entry.delete("1.0", tk.END)
             self.pad_entry.insert(tk.END, self.presets[selected_name])
 
     def on_delete_preset(self):
-        """Deletes the currently selected preset."""
         selected = self.preset_var.get()
         if selected and selected != "Load Preset":
             if messagebox.askyesno("Delete Preset", f"Are you sure you want to delete the preset '{selected}'?"):
@@ -279,13 +266,14 @@ class PadSVGGeneratorApp:
                     messagebox.showerror("Error Deleting Preset", str(e))
 
 class OptionsWindow:
+    # ... (This class remains the same as the previous version)
     def __init__(self, parent, settings, update_callback, save_callback):
         self.settings = settings
         self.update_callback = update_callback
         self.save_callback = save_callback
         
         self.top = tk.Toplevel(parent)
-        self.top.title("Options")
+        self.top.title("Sizing Rules")
         self.top.geometry("450x280")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
@@ -329,7 +317,6 @@ class OptionsWindow:
         tk.Button(button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=10)
 
     def save_options(self):
-        """Saves the current options and closes the window."""
         self.settings["units"] = self.unit_var.get()
         self.settings["felt_offset"] = self.felt_offset_var.get()
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
@@ -341,7 +328,6 @@ class OptionsWindow:
         self.top.destroy()
 
     def revert_to_defaults(self):
-        """Resets the options in the window to their default values."""
         if messagebox.askyesno("Revert to Defaults", "Are you sure you want to revert all settings to their original defaults?"):
             self.unit_var.set(DEFAULT_SETTINGS["units"])
             self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
@@ -349,49 +335,89 @@ class OptionsWindow:
             self.leather_mult_var.set(DEFAULT_SETTINGS["leather_wrap_multiplier"])
             self.min_hole_size_var.set(DEFAULT_SETTINGS["min_hole_size"])
 
-# --- Core SVG Generation Logic (outside the GUI class) ---
+class LayerColorWindow:
+    def __init__(self, parent, settings, save_callback):
+        self.settings = settings
+        self.save_callback = save_callback
+        
+        self.top = tk.Toplevel(parent)
+        self.top.title("Layer Color Mapping")
+        self.top.geometry("400x250")
+        self.top.configure(bg="#F0EAD6")
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        # Create a mapping from color name to hex value for the combobox
+        self.color_map = {name: hex_val for name, hex_val in LIGHTBURN_COLORS}
+        color_names = list(self.color_map.keys())
+
+        # Create a reverse map to find the name from a hex value
+        self.hex_to_name_map = {hex_val: name for name, hex_val in LIGHTBURN_COLORS}
+
+        self.color_vars = {}
+
+        main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
+        main_frame.pack(fill="both", expand=True)
+        main_frame.columnconfigure(1, weight=1)
+
+        # Create a dropdown for each layer type
+        layer_types = ['felt', 'card', 'leather', 'center_hole', 'engraving']
+        for i, layer in enumerate(layer_types):
+            tk.Label(main_frame, text=f"{layer.replace('_', ' ').capitalize()}:", bg="#F0EAD6").grid(row=i, column=0, sticky='w', pady=5)
+            
+            var = tk.StringVar()
+            # Find the current color name from the saved hex value
+            current_hex = self.settings["layer_colors"].get(layer, "#000000")
+            current_name = self.hex_to_name_map.get(current_hex, color_names[0])
+            var.set(current_name)
+            
+            combo = ttk.Combobox(main_frame, textvariable=var, values=color_names, state="readonly")
+            combo.grid(row=i, column=1, sticky='ew', padx=5)
+            self.color_vars[layer] = var
+
+        button_frame = tk.Frame(main_frame, bg="#F0EAD6")
+        button_frame.grid(row=len(layer_types), column=0, columnspan=2, pady=20)
+        tk.Button(button_frame, text="Save", command=self.save_colors).pack(side="left", padx=10)
+        tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
+
+    def save_colors(self):
+        """Saves the selected colors to the settings and closes the window."""
+        for layer, var in self.color_vars.items():
+            selected_name = var.get()
+            self.settings["layer_colors"][layer] = self.color_map[selected_name]
+        
+        self.save_callback()
+        self.top.destroy()
+
+# --- Core SVG Generation Logic ---
 
 def leather_back_wrap(pad_size, multiplier):
-    """Calculates the variable amount of leather to wrap around the back."""
     base_wrap = 0
-    if pad_size <= 10:
-        base_wrap = 1.3
-    elif pad_size <= 15:
-        base_wrap = 1.3 + (pad_size - 10) * (0.7 / 5.0)
-    elif pad_size <= 40:
-        base_wrap = 2.0 + (pad_size - 15) * (1.5 / 25.0)
-    else:
-        base_wrap = 3.5
+    if pad_size <= 10: base_wrap = 1.3
+    elif pad_size <= 15: base_wrap = 1.3 + (pad_size - 10) * (0.7 / 5.0)
+    elif pad_size <= 40: base_wrap = 2.0 + (pad_size - 15) * (1.5 / 25.0)
+    else: base_wrap = 3.5
     return base_wrap * multiplier
 
 def should_have_center_hole(pad_size, hole_option, settings):
-    """Determines if a pad of a given size should have a center hole."""
-    min_size = settings.get("min_hole_size", 16.5) # Use .get for safety
+    min_size = settings.get("min_hole_size", 16.5)
     return hole_option != "No center holes" and pad_size >= min_size
 
 def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
-    """
-    Performs a dry run of the nesting algorithm to see if all pieces fit.
-    Returns True if they fit, False otherwise.
-    """
     spacing_mm = 1.0
     discs = []
     
     for pad in pads:
         pad_size, qty = pad['size'], pad['qty']
         diameter = 0
-        if material == 'felt':
-            diameter = pad_size - settings["felt_offset"]
-        elif material == 'card':
-            diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+        if material == 'felt': diameter = pad_size - settings["felt_offset"]
+        elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
         elif material == 'leather':
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
             diameter = pad_size + 2 * (3.175 + wrap)
             diameter = round(diameter * 2) / 2
-        else:
-            continue
-        for _ in range(qty):
-            discs.append((pad_size, diameter))
+        else: continue
+        for _ in range(qty): discs.append((pad_size, diameter))
 
     discs.sort(key=lambda x: -x[1])
     placed = []
@@ -413,27 +439,21 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     
     return len(placed) == len(discs)
 
-
 def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, settings):
-    """Generates and saves a single SVG file for a given material."""
     spacing_mm = 1.0
     discs = []
 
     for pad in pads:
         pad_size, qty = pad['size'], pad['qty']
         diameter = 0
-        if material == 'felt':
-            diameter = pad_size - settings["felt_offset"]
-        elif material == 'card':
-            diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+        if material == 'felt': diameter = pad_size - settings["felt_offset"]
+        elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
         elif material == 'leather':
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
             diameter = pad_size + 2 * (3.175 + wrap)
             diameter = round(diameter * 2) / 2
-        else:
-            continue
-        for _ in range(qty):
-            discs.append((pad_size, diameter))
+        else: continue
+        for _ in range(qty): discs.append((pad_size, diameter))
 
     discs.sort(key=lambda x: -x[1])
     placed = []
@@ -454,21 +474,19 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
             y += 1
 
     dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
+    layer_colors = settings.get("layer_colors", DEFAULT_SETTINGS["layer_colors"])
 
     for pad_size, cx, cy, r in placed:
-        dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=LAYER_COLORS[material], fill='none', stroke_width='0.1mm'))
+        dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[material], fill='none', stroke_width='0.1mm'))
 
         hole_dia = 0
-        if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings):
-            hole_dia = 3.5
-        elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings):
-            hole_dia = 3.0
+        if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.5
+        elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.0
 
         if hole_dia > 0:
-            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=LAYER_COLORS['center_hole'], fill='none', stroke_width='0.1mm'))
+            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors['center_hole'], fill='none', stroke_width='0.1mm'))
 
-        if material == 'leather':
-            engraving_y = cy - (r - 1.0)
+        if material == 'leather': engraving_y = cy - (r - 1.0)
         else:
             offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
             engraving_y = cy - offset_from_center
@@ -479,7 +497,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
                          insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
                          text_anchor="middle",
                          font_size="2mm",
-                         fill=LAYER_COLORS['engraving']))
+                         fill=layer_colors['engraving']))
 
     dwg.save()
 
