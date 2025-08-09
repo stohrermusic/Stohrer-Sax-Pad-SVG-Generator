@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
         'card_center_hole': '#00A0FF',  # Light Blue
         'card_engraving': '#A000A0',    # Dark Magenta
         'leather_outline': '#FF0000',   # Red
+        'leather_center_hole': '#00E000', # Green
         'leather_engraving': '#FF8000'  # Orange
     }
 }
@@ -344,7 +345,7 @@ class LayerColorWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Layer Color Mapping")
-        self.top.geometry("450x350")
+        self.top.geometry("450x380")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -362,7 +363,7 @@ class LayerColorWindow:
         layer_map_keys = [
             'felt_outline', 'felt_center_hole', 'felt_engraving',
             'card_outline', 'card_center_hole', 'card_engraving',
-            'leather_outline', 'leather_engraving'
+            'leather_outline', 'leather_center_hole', 'leather_engraving'
         ]
         
         for i, key in enumerate(layer_map_keys):
@@ -485,7 +486,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.5
         elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.0
 
-        if hole_dia > 0 and material != 'leather':
+        if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
         if material == 'leather': 
@@ -510,3 +511,4 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
+
