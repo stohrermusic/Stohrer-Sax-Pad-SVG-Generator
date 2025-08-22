@@ -29,15 +29,18 @@ DEFAULT_SETTINGS = {
     "hole_option": "3.5mm",
     "min_hole_size": 16.5,
     "layer_colors": {
-        'felt_outline': '#000000',      # Black
-        'felt_center_hole': '#0000A0',  # Dark Blue
-        'felt_engraving': '#A00000',    # Dark Red
-        'card_outline': '#0000FF',      # Blue
-        'card_center_hole': '#00A0FF',  # Light Blue
-        'card_engraving': '#A000A0',    # Dark Magenta
-        'leather_outline': '#FF0000',   # Red
-        'leather_center_hole': '#00E000', # Green
-        'leather_engraving': '#FF8000'  # Orange
+        'felt_outline': '#000000',
+        'felt_center_hole': '#0000A0',
+        'felt_engraving': '#A00000',
+        'card_outline': '#0000FF',
+        'card_center_hole': '#00A0FF',
+        'card_engraving': '#A000A0',
+        'leather_outline': '#FF0000',
+        'leather_center_hole': '#00E000',
+        'leather_engraving': '#FF8000',
+        'exact_size_outline': '#D0D000',
+        'exact_size_center_hole': '#A0A000',
+        'exact_size_engraving': '#BB7784'
     }
 }
 
@@ -47,8 +50,8 @@ SETTINGS_FILE = "app_settings.json"
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sax Pad SVG Generator (Phil's Edition)")
-        self.root.geometry("620x620")
+        self.root.title("Sax Pad SVG Generator (beta)")
+        self.root.geometry("620x640") # Increased height slightly for new checkbox
         self.root.configure(bg="#FFFDD0")
 
         self.settings = self.load_settings()
@@ -72,7 +75,6 @@ class PadSVGGeneratorApp:
                 with open(SETTINGS_FILE, 'r') as f:
                     loaded_settings = json.load(f)
                     settings = DEFAULT_SETTINGS.copy()
-                    # Deep update for nested dictionaries like layer_colors
                     for key, value in loaded_settings.items():
                         if key in settings and isinstance(settings[key], dict) and isinstance(value, dict):
                             settings[key].update(value)
@@ -121,9 +123,14 @@ class PadSVGGeneratorApp:
         tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_preset).pack(side="left", padx=5)
 
         tk.Label(self.root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
-        self.material_vars = {'felt': tk.BooleanVar(value=True), 'card': tk.BooleanVar(value=True), 'leather': tk.BooleanVar(value=True)}
+        self.material_vars = {
+            'felt': tk.BooleanVar(value=True), 
+            'card': tk.BooleanVar(value=True), 
+            'leather': tk.BooleanVar(value=True),
+            'exact_size': tk.BooleanVar(value=False)
+        }
         for m in self.material_vars:
-            tk.Checkbutton(self.root, text=m.capitalize(), variable=self.material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
+            tk.Checkbutton(self.root, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
 
         options_frame = tk.Frame(self.root, bg="#FFFDD0")
         options_frame.pack(pady=10, fill='x', padx=10)
@@ -190,7 +197,7 @@ class PadSVGGeneratorApp:
             
             for material, var in self.material_vars.items():
                 if var.get() and not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
-                    messagebox.showerror("Nesting Error", f"Could not fit all '{material}' pieces on the specified sheet size.")
+                    messagebox.showerror("Nesting Error", f"Could not fit all '{material.replace('_',' ')}' pieces on the specified sheet size.")
                     return
 
             save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
@@ -345,7 +352,7 @@ class LayerColorWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Layer Color Mapping")
-        self.top.geometry("450x380")
+        self.top.geometry("450x420")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -363,7 +370,8 @@ class LayerColorWindow:
         layer_map_keys = [
             'felt_outline', 'felt_center_hole', 'felt_engraving',
             'card_outline', 'card_center_hole', 'card_engraving',
-            'leather_outline', 'leather_center_hole', 'leather_engraving'
+            'leather_outline', 'leather_center_hole', 'leather_engraving',
+            'exact_size_outline', 'exact_size_center_hole', 'exact_size_engraving'
         ]
         
         for i, key in enumerate(layer_map_keys):
@@ -419,6 +427,8 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
             diameter = pad_size + 2 * (3.175 + wrap)
             diameter = round(diameter * 2) / 2
+        elif material == 'exact_size':
+            diameter = pad_size
         else: continue
         for _ in range(qty): discs.append((pad_size, diameter))
 
@@ -455,6 +465,8 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
             diameter = pad_size + 2 * (3.175 + wrap)
             diameter = round(diameter * 2) / 2
+        elif material == 'exact_size':
+            diameter = pad_size
         else: continue
         for _ in range(qty): discs.append((pad_size, diameter))
 
@@ -489,13 +501,12 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
+        engraving_y = 0
         if material == 'leather': 
             engraving_y = cy - (r - 1.0)
-            engraving_color = layer_colors['leather_engraving']
         else:
             offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
             engraving_y = cy - offset_from_center
-            engraving_color = layer_colors[f'{material}_engraving']
         
         vertical_adjust = 0.7 
         
@@ -503,7 +514,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
                          insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
                          text_anchor="middle",
                          font_size="2mm",
-                         fill=engraving_color))
+                         fill=layer_colors[f'{material}_engraving']))
 
     dwg.save()
 
@@ -511,4 +522,5 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
+
 
