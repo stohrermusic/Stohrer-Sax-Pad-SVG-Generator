@@ -28,6 +28,8 @@ DEFAULT_SETTINGS = {
     "sheet_height": "10",
     "hole_option": "3.5mm",
     "min_hole_size": 16.5,
+    "felt_thickness": 3.175,
+    "felt_thickness_unit": "mm", # New setting for felt thickness unit
     "layer_colors": {
         'felt_outline': '#000000',
         'felt_center_hole': '#0000A0',
@@ -50,8 +52,8 @@ SETTINGS_FILE = "app_settings.json"
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sax Pad SVG Generator (beta)")
-        self.root.geometry("620x640") # Increased height slightly for new checkbox
+        self.root.title("Sax Pad SVG Generator (Phil's Edition)")
+        self.root.geometry("620x640")
         self.root.configure(bg="#FFFDD0")
 
         self.settings = self.load_settings()
@@ -284,7 +286,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("450x280")
+        self.top.geometry("450x340")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -294,6 +296,8 @@ class OptionsWindow:
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
         self.leather_mult_var = tk.DoubleVar(value=self.settings["leather_wrap_multiplier"])
         self.min_hole_size_var = tk.DoubleVar(value=self.settings["min_hole_size"])
+        self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
+        self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
 
         main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
         main_frame.pack(fill="both", expand=True)
@@ -319,6 +323,15 @@ class OptionsWindow:
 
         tk.Label(rules_frame, text="Min. Pad Size for Hole (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.min_hole_size_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
+        
+        # Felt Thickness with Unit Selection
+        felt_thickness_frame = tk.Frame(rules_frame, bg="#F0EAD6")
+        felt_thickness_frame.grid(row=4, column=0, columnspan=2, sticky='w', pady=2)
+        tk.Label(felt_thickness_frame, text="Felt Thickness:", bg="#F0EAD6").pack(side="left")
+        tk.Entry(felt_thickness_frame, textvariable=self.felt_thickness_var, width=10).pack(side="left", padx=5)
+        tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
+
 
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
@@ -332,6 +345,8 @@ class OptionsWindow:
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
         self.settings["leather_wrap_multiplier"] = self.leather_mult_var.get()
         self.settings["min_hole_size"] = self.min_hole_size_var.get()
+        self.settings["felt_thickness"] = self.felt_thickness_var.get()
+        self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
         self.save_callback()
         self.update_callback()
@@ -344,6 +359,8 @@ class OptionsWindow:
             self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
             self.leather_mult_var.set(DEFAULT_SETTINGS["leather_wrap_multiplier"])
             self.min_hole_size_var.set(DEFAULT_SETTINGS["min_hole_size"])
+            self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
+            self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
 
 class LayerColorWindow:
     def __init__(self, parent, settings, save_callback):
@@ -414,6 +431,13 @@ def should_have_center_hole(pad_size, hole_option, settings):
     min_size = settings.get("min_hole_size", 16.5)
     return hole_option != "No center holes" and pad_size >= min_size
 
+def get_felt_thickness_mm(settings):
+    """Returns the felt thickness in mm, converting from inches if necessary."""
+    thickness = settings.get("felt_thickness", 3.175)
+    if settings.get("felt_thickness_unit") == "in":
+        return thickness * 25.4
+    return thickness
+
 def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     spacing_mm = 1.0
     discs = []
@@ -425,7 +449,8 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
         elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
         elif material == 'leather':
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
-            diameter = pad_size + 2 * (3.175 + wrap)
+            felt_thickness_mm = get_felt_thickness_mm(settings)
+            diameter = pad_size + 2 * (felt_thickness_mm + wrap)
             diameter = round(diameter * 2) / 2
         elif material == 'exact_size':
             diameter = pad_size
@@ -463,7 +488,8 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
         elif material == 'leather':
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
-            diameter = pad_size + 2 * (3.175 + wrap)
+            felt_thickness_mm = get_felt_thickness_mm(settings)
+            diameter = pad_size + 2 * (felt_thickness_mm + wrap)
             diameter = round(diameter * 2) / 2
         elif material == 'exact_size':
             diameter = pad_size
@@ -522,5 +548,4 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
-
 
