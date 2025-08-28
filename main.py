@@ -29,7 +29,9 @@ DEFAULT_SETTINGS = {
     "hole_option": "3.5mm",
     "min_hole_size": 16.5,
     "felt_thickness": 3.175,
-    "felt_thickness_unit": "mm", # New setting for felt thickness unit
+    "felt_thickness_unit": "mm",
+    "engraving_on": True,
+    "engraving_font_size": 2.0,
     "layer_colors": {
         'felt_outline': '#000000',
         'felt_center_hole': '#0000A0',
@@ -286,7 +288,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("450x340")
+        self.top.geometry("450x370")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -298,6 +300,8 @@ class OptionsWindow:
         self.min_hole_size_var = tk.DoubleVar(value=self.settings["min_hole_size"])
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
+        self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
+        self.engraving_font_size_var = tk.DoubleVar(value=self.settings["engraving_font_size"])
 
         main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
         main_frame.pack(fill="both", expand=True)
@@ -324,7 +328,6 @@ class OptionsWindow:
         tk.Label(rules_frame, text="Min. Pad Size for Hole (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.min_hole_size_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
         
-        # Felt Thickness with Unit Selection
         felt_thickness_frame = tk.Frame(rules_frame, bg="#F0EAD6")
         felt_thickness_frame.grid(row=4, column=0, columnspan=2, sticky='w', pady=2)
         tk.Label(felt_thickness_frame, text="Felt Thickness:", bg="#F0EAD6").pack(side="left")
@@ -332,6 +335,10 @@ class OptionsWindow:
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
 
+        tk.Checkbutton(rules_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").grid(row=5, column=0, columnspan=2, sticky='w', pady=2)
+
+        tk.Label(rules_frame, text="Label Font Size (mm):", bg="#F0EAD6").grid(row=6, column=0, sticky='w', pady=2)
+        tk.Entry(rules_frame, textvariable=self.engraving_font_size_var, width=10).grid(row=6, column=1, sticky='w', pady=2)
 
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
@@ -347,6 +354,8 @@ class OptionsWindow:
         self.settings["min_hole_size"] = self.min_hole_size_var.get()
         self.settings["felt_thickness"] = self.felt_thickness_var.get()
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
+        self.settings["engraving_on"] = self.engraving_on_var.get()
+        self.settings["engraving_font_size"] = self.engraving_font_size_var.get()
         
         self.save_callback()
         self.update_callback()
@@ -361,6 +370,8 @@ class OptionsWindow:
             self.min_hole_size_var.set(DEFAULT_SETTINGS["min_hole_size"])
             self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
+            self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
+            self.engraving_font_size_var.set(DEFAULT_SETTINGS["engraving_font_size"])
 
 class LayerColorWindow:
     def __init__(self, parent, settings, save_callback):
@@ -420,17 +431,14 @@ class LayerColorWindow:
 # --- Core SVG Generation Logic ---
 
 def leather_back_wrap(pad_size, multiplier):
-    """Calculates the variable amount of leather to wrap around the back based on new rules."""
     base_wrap = 0
     if pad_size >= 45:
         base_wrap = 3.2
-    elif pad_size >= 12: # This covers the range [12, 45)
-        # Linear interpolation from 1.2mm at 12mm pad size to 3.2mm at 45mm pad size
+    elif pad_size >= 12:
         base_wrap = 1.2 + (pad_size - 12) * (2.0 / 33.0)
-    elif pad_size >= 6: # This covers the range [6, 12)
-        # Linear interpolation from 1.0mm at 6mm pad size to 1.2mm at 12mm pad size
+    elif pad_size >= 6:
         base_wrap = 1.0 + (pad_size - 6) * (0.2 / 6.0)
-    else: # For pads smaller than 6mm
+    else:
         base_wrap = 1.0
     return base_wrap * multiplier
 
@@ -439,7 +447,6 @@ def should_have_center_hole(pad_size, hole_option, settings):
     return hole_option != "No center holes" and pad_size >= min_size
 
 def get_felt_thickness_mm(settings):
-    """Returns the felt thickness in mm, converting from inches if necessary."""
     thickness = settings.get("felt_thickness", 3.175)
     if settings.get("felt_thickness_unit") == "in":
         return thickness * 25.4
@@ -534,20 +541,22 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
-        engraving_y = 0
-        if material == 'leather': 
-            engraving_y = cy - (r - 1.0)
-        else:
-            offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
-            engraving_y = cy - offset_from_center
-        
-        vertical_adjust = 0.7 
-        
-        dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
-                         insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
-                         text_anchor="middle",
-                         font_size="2mm",
-                         fill=layer_colors[f'{material}_engraving']))
+        if settings.get("engraving_on", True):
+            engraving_y = 0
+            if material == 'leather': 
+                engraving_y = cy - (r - 1.0)
+            else:
+                offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
+                engraving_y = cy - offset_from_center
+            
+            vertical_adjust = 0.7 
+            font_size = settings.get("engraving_font_size", 2.0)
+            
+            dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
+                             insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
+                             text_anchor="middle",
+                             font_size=f"{font_size}mm",
+                             fill=layer_colors[f'{material}_engraving']))
 
     dwg.save()
 
