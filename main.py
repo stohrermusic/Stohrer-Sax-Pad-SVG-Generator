@@ -52,7 +52,7 @@ SETTINGS_FILE = "app_settings.json"
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sax Pad SVG Generator (Phil's Edition)")
+        self.root.title("Stohrer Sax Pad SVG Generator")
         self.root.geometry("620x640")
         self.root.configure(bg="#FFFDD0")
 
@@ -420,11 +420,18 @@ class LayerColorWindow:
 # --- Core SVG Generation Logic ---
 
 def leather_back_wrap(pad_size, multiplier):
+    """Calculates the variable amount of leather to wrap around the back based on new rules."""
     base_wrap = 0
-    if pad_size <= 10: base_wrap = 1.3
-    elif pad_size <= 15: base_wrap = 1.3 + (pad_size - 10) * (0.7 / 5.0)
-    elif pad_size <= 40: base_wrap = 2.0 + (pad_size - 15) * (1.5 / 25.0)
-    else: base_wrap = 3.5
+    if pad_size >= 45:
+        base_wrap = 3.2
+    elif pad_size >= 12: # This covers the range [12, 45)
+        # Linear interpolation from 1.2mm at 12mm pad size to 3.2mm at 45mm pad size
+        base_wrap = 1.2 + (pad_size - 12) * (2.0 / 33.0)
+    elif pad_size >= 6: # This covers the range [6, 12)
+        # Linear interpolation from 1.0mm at 6mm pad size to 1.2mm at 12mm pad size
+        base_wrap = 1.0 + (pad_size - 6) * (0.2 / 6.0)
+    else: # For pads smaller than 6mm
+        base_wrap = 1.0
     return base_wrap * multiplier
 
 def should_have_center_hole(pad_size, hole_option, settings):
