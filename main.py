@@ -27,11 +27,18 @@ DEFAULT_SETTINGS = {
     "sheet_width": "13.5",
     "sheet_height": "10",
     "hole_option": "3.5mm",
+    "custom_hole_size": "4.0",
     "min_hole_size": 16.5,
     "felt_thickness": 3.175,
     "felt_thickness_unit": "mm",
     "engraving_on": True,
     "engraving_font_size": 2.0,
+    "engraving_location": {
+        "felt": {"mode": "centered", "value": 0.0},
+        "card": {"mode": "centered", "value": 0.0},
+        "leather": {"mode": "from_outside", "value": 1.0},
+        "exact_size": {"mode": "centered", "value": 0.0}
+    },
     "layer_colors": {
         'felt_outline': '#000000',
         'felt_center_hole': '#0000A0',
@@ -70,6 +77,8 @@ class PadSVGGeneratorApp:
         self.settings["sheet_width"] = self.width_entry.get()
         self.settings["sheet_height"] = self.height_entry.get()
         self.settings["hole_option"] = self.hole_var.get()
+        if self.hole_var.get() == "Custom":
+            self.settings["custom_hole_size"] = self.custom_hole_entry.get()
         self.save_settings()
         self.root.destroy()
 
@@ -138,24 +147,40 @@ class PadSVGGeneratorApp:
 
         options_frame = tk.Frame(self.root, bg="#FFFDD0")
         options_frame.pack(pady=10, fill='x', padx=10)
-        options_frame.columnconfigure(1, weight=1)
-        options_frame.columnconfigure(3, weight=1)
 
-        tk.Label(options_frame, text="Center hole:", bg="#FFFDD0").grid(row=0, column=0, sticky='w', padx=5)
+        # Center Hole Selection UI
+        hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg="#FFFDD0", padx=5, pady=5)
+        hole_frame.pack(fill="x")
         self.hole_var = tk.StringVar(value=self.settings["hole_option"])
-        tk.OptionMenu(options_frame, self.hole_var, "No center holes", "3.5mm", "3.0mm").grid(row=0, column=1, sticky='w')
+        
+        tk.Radiobutton(hole_frame, text="None", variable=self.hole_var, value="No center holes", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.0mm", variable=self.hole_var, value="3.0mm", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.5mm", variable=self.hole_var, value="3.5mm", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="Custom:", variable=self.hole_var, value="Custom", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
+        
+        self.custom_hole_entry = tk.Entry(hole_frame, width=6)
+        self.custom_hole_entry.insert(0, self.settings.get("custom_hole_size", "4.0"))
+        self.custom_hole_entry.pack(side="left", padx=2)
+        tk.Label(hole_frame, text="mm", bg="#FFFDD0").pack(side="left")
+        self.toggle_custom_hole_entry()
 
-        self.unit_label = tk.Label(options_frame, text=f"Sheet width ({self.settings['units']}):", bg="#FFFDD0")
-        self.unit_label.grid(row=1, column=0, sticky='w', padx=5)
-        self.width_entry = tk.Entry(options_frame)
+
+        # Sheet Size UI
+        sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg="#FFFDD0", padx=5, pady=5)
+        sheet_frame.pack(fill="x", pady=(10,0))
+        sheet_frame.columnconfigure(1, weight=1)
+
+        self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg="#FFFDD0")
+        self.unit_label.grid(row=0, column=0, sticky='w', padx=5)
+        self.width_entry = tk.Entry(sheet_frame)
         self.width_entry.insert(0, self.settings["sheet_width"])
-        self.width_entry.grid(row=1, column=1, sticky='ew')
+        self.width_entry.grid(row=0, column=1, sticky='ew')
 
-        self.height_label = tk.Label(options_frame, text=f"Sheet height ({self.settings['units']}):", bg="#FFFDD0")
-        self.height_label.grid(row=2, column=0, sticky='w', padx=5)
-        self.height_entry = tk.Entry(options_frame)
+        self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg="#FFFDD0")
+        self.height_label.grid(row=1, column=0, sticky='w', padx=5)
+        self.height_entry = tk.Entry(sheet_frame)
         self.height_entry.insert(0, self.settings["sheet_height"])
-        self.height_entry.grid(row=2, column=1, sticky='ew')
+        self.height_entry.grid(row=1, column=1, sticky='ew')
 
         tk.Label(self.root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
         self.filename_entry = tk.Entry(self.root)
@@ -164,6 +189,12 @@ class PadSVGGeneratorApp:
 
         tk.Button(self.root, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
 
+    def toggle_custom_hole_entry(self):
+        if self.hole_var.get() == "Custom":
+            self.custom_hole_entry.config(state='normal')
+        else:
+            self.custom_hole_entry.config(state='disabled')
+
     def open_options_window(self):
         OptionsWindow(self.root, self.settings, self.update_ui_from_settings, self.save_settings)
 
@@ -171,11 +202,26 @@ class PadSVGGeneratorApp:
         LayerColorWindow(self.root, self.settings, self.save_settings)
 
     def update_ui_from_settings(self):
-        self.unit_label.config(text=f"Sheet width ({self.settings['units']}):")
-        self.height_label.config(text=f"Sheet height ({self.settings['units']}):")
+        self.unit_label.config(text=f"Width ({self.settings['units']}):")
+        self.height_label.config(text=f"Height ({self.settings['units']}):")
+
+    def get_hole_dia(self):
+        hole_option = self.hole_var.get()
+        if hole_option == "3.5mm": return 3.5
+        if hole_option == "3.0mm": return 3.0
+        if hole_option == "Custom":
+            try:
+                return float(self.custom_hole_entry.get())
+            except (ValueError, TypeError):
+                messagebox.showerror("Invalid Input", "Custom hole size must be a valid number.")
+                return None
+        return 0
 
     def on_generate(self):
         try:
+            hole_dia = self.get_hole_dia()
+            if hole_dia is None: return
+
             width_val = float(self.width_entry.get())
             height_val = float(self.height_entry.get())
             
@@ -212,7 +258,7 @@ class PadSVGGeneratorApp:
             for material, var in self.material_vars.items():
                 if var.get():
                     filename = os.path.join(save_dir, f"{base}_{material}.svg")
-                    generate_svg(pads, material, width_mm, height_mm, filename, self.hole_var.get(), self.settings)
+                    generate_svg(pads, material, width_mm, height_mm, filename, hole_dia, self.settings)
                     files_generated = True
             
             if files_generated:
@@ -288,11 +334,27 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("450x370")
+        self.top.geometry("500x600")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
+        
+        # Create a canvas and a scrollbar
+        self.canvas = tk.Canvas(self.top, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self.top, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6", padx=10, pady=10)
 
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        self.top.bind('<MouseWheel>', self._on_mousewheel)
+
+
+        # --- Sizing variables ---
         self.unit_var = tk.StringVar(value=self.settings["units"])
         self.felt_offset_var = tk.DoubleVar(value=self.settings["felt_offset"])
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
@@ -300,12 +362,20 @@ class OptionsWindow:
         self.min_hole_size_var = tk.DoubleVar(value=self.settings["min_hole_size"])
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
+        
+        # --- Engraving variables ---
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.engraving_font_size_var = tk.DoubleVar(value=self.settings["engraving_font_size"])
+        self.engraving_loc_vars = {}
 
-        main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
-        main_frame.pack(fill="both", expand=True)
+        self.create_option_widgets()
+    
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
+    def create_option_widgets(self):
+        main_frame = self.scrollable_frame
+        
         unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
         unit_frame.pack(fill="x", pady=5)
         tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=5)
@@ -335,10 +405,35 @@ class OptionsWindow:
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
 
-        tk.Checkbutton(rules_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").grid(row=5, column=0, columnspan=2, sticky='w', pady=2)
+        # --- Engraving Section ---
+        engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
+        engraving_frame.pack(fill="x", pady=5)
+        engraving_frame.columnconfigure(1, weight=1)
+        
+        tk.Checkbutton(engraving_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+        tk.Label(engraving_frame, text="Label Font Size (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(engraving_frame, textvariable=self.engraving_font_size_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
 
-        tk.Label(rules_frame, text="Label Font Size (mm):", bg="#F0EAD6").grid(row=6, column=0, sticky='w', pady=2)
-        tk.Entry(rules_frame, textvariable=self.engraving_font_size_var, width=10).grid(row=6, column=1, sticky='w', pady=2)
+        engraving_loc_frame = tk.LabelFrame(main_frame, text="Engraving Placement", bg="#F0EAD6", padx=5, pady=5)
+        engraving_loc_frame.pack(fill="x", pady=5)
+        
+        materials = ['felt', 'card', 'leather', 'exact_size']
+        for material in materials:
+            frame = tk.Frame(engraving_loc_frame, bg="#F0EAD6")
+            frame.pack(fill='x', pady=2)
+            tk.Label(frame, text=material.replace('_', ' ').capitalize() + ":", bg="#F0EAD6", width=10, anchor='w').pack(side="left")
+
+            mode_var = tk.StringVar(value=self.settings["engraving_location"][material]['mode'])
+            val_var = tk.DoubleVar(value=self.settings["engraving_location"][material]['value'])
+            self.engraving_loc_vars[material] = {'mode': mode_var, 'value': val_var}
+
+            tk.Radiobutton(frame, text="from outside", variable=mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="from inside", variable=mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="centered", variable=mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+            
+            tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
+            tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
+
 
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
@@ -347,6 +442,7 @@ class OptionsWindow:
         tk.Button(button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=10)
 
     def save_options(self):
+        # Sizing
         self.settings["units"] = self.unit_var.get()
         self.settings["felt_offset"] = self.felt_offset_var.get()
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
@@ -354,15 +450,21 @@ class OptionsWindow:
         self.settings["min_hole_size"] = self.min_hole_size_var.get()
         self.settings["felt_thickness"] = self.felt_thickness_var.get()
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
+        
+        # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
         self.settings["engraving_font_size"] = self.engraving_font_size_var.get()
-        
+        for material, vars in self.engraving_loc_vars.items():
+            self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
+            self.settings["engraving_location"][material]['value'] = vars['value'].get()
+
         self.save_callback()
         self.update_callback()
         self.top.destroy()
 
     def revert_to_defaults(self):
         if messagebox.askyesno("Revert to Defaults", "Are you sure you want to revert all settings to their original defaults?"):
+            # Sizing
             self.unit_var.set(DEFAULT_SETTINGS["units"])
             self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
             self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
@@ -370,8 +472,14 @@ class OptionsWindow:
             self.min_hole_size_var.set(DEFAULT_SETTINGS["min_hole_size"])
             self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
+            
+            # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
             self.engraving_font_size_var.set(DEFAULT_SETTINGS["engraving_font_size"])
+            for material, vars in self.engraving_loc_vars.items():
+                 vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
+                 vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
+
 
 class LayerColorWindow:
     def __init__(self, parent, settings, save_callback):
@@ -442,9 +550,9 @@ def leather_back_wrap(pad_size, multiplier):
         base_wrap = 1.0
     return base_wrap * multiplier
 
-def should_have_center_hole(pad_size, hole_option, settings):
+def should_have_center_hole(pad_size, hole_dia, settings):
     min_size = settings.get("min_hole_size", 16.5)
-    return hole_option != "No center holes" and pad_size >= min_size
+    return hole_dia > 0 and pad_size >= min_size
 
 def get_felt_thickness_mm(settings):
     thickness = settings.get("felt_thickness", 3.175)
@@ -491,7 +599,7 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     
     return len(placed) == len(discs)
 
-def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, settings):
+def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset, settings):
     spacing_mm = 1.0
     discs = []
 
@@ -535,20 +643,28 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_option, set
         dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width='0.1mm'))
 
         hole_dia = 0
-        if hole_option == "3.5mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.5
-        elif hole_option == "3.0mm" and should_have_center_hole(pad_size, hole_option, settings): hole_dia = 3.0
+        if should_have_center_hole(pad_size, hole_dia_preset, settings):
+            hole_dia = hole_dia_preset
 
         if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
         if settings.get("engraving_on", True):
-            engraving_y = 0
-            if material == 'leather': 
-                engraving_y = cy - (r - 1.0)
-            else:
-                offset_from_center = (r + (hole_dia / 2 if hole_dia > 0 else 1.75)) / 2
-                engraving_y = cy - offset_from_center
+            engraving_settings = settings["engraving_location"][material]
+            mode = engraving_settings['mode']
+            value = engraving_settings['value']
             
+            engraving_y = 0
+            if mode == 'from_outside':
+                engraving_y = cy - (r - value)
+            elif mode == 'from_inside':
+                hole_r = hole_dia / 2 if hole_dia > 0 else 0
+                engraving_y = cy - (hole_r + value)
+            else: # centered
+                hole_r = hole_dia / 2 if hole_dia > 0 else 1.75 # Use a small default if no hole for centering
+                offset_from_center = (r + hole_r) / 2
+                engraving_y = cy - offset_from_center
+
             vertical_adjust = 0.7 
             font_size = settings.get("engraving_font_size", 2.0)
             
@@ -564,4 +680,3 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = PadSVGGeneratorApp(root)
     root.mainloop()
-
