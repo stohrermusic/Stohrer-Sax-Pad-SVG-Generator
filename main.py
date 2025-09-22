@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     "felt_thickness": 3.175,
     "felt_thickness_unit": "mm",
     "engraving_on": True,
+    "show_engraving_warning": True,
+    "last_output_dir": "",
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -63,6 +65,40 @@ DEFAULT_SETTINGS = {
 PRESET_FILE = "pad_presets.json"
 SETTINGS_FILE = "app_settings.json"
 
+class ConfirmationDialog(tk.Toplevel):
+    def __init__(self, parent, title, message):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("450x150")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+
+        self.result = False
+        self.dont_show_again = tk.BooleanVar()
+
+        tk.Label(self, text=message, wraplength=430, bg="#F0EAD6", justify="left").pack(padx=10, pady=10)
+        
+        checkbox_frame = tk.Frame(self, bg="#F0EAD6")
+        checkbox_frame.pack(pady=5)
+        tk.Checkbutton(checkbox_frame, text="Don't show this message again", variable=self.dont_show_again, bg="#F0EAD6").pack()
+        
+        button_frame = tk.Frame(self, bg="#F0EAD6")
+        button_frame.pack(pady=10)
+        tk.Button(button_frame, text="Yes, Proceed", command=self.on_yes).pack(side="left", padx=10)
+        tk.Button(button_frame, text="No, Cancel", command=self.on_no).pack(side="left", padx=10)
+
+        self.protocol("WM_DELETE_WINDOW", self.on_no)
+        self.wait_window(self)
+
+    def on_yes(self):
+        self.result = True
+        self.destroy()
+
+    def on_no(self):
+        self.result = False
+        self.destroy()
+
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
@@ -93,7 +129,6 @@ class PadSVGGeneratorApp:
                 with open(SETTINGS_FILE, 'r') as f:
                     loaded_settings = json.load(f)
                     settings = DEFAULT_SETTINGS.copy()
-                    # Deep update for nested dictionaries
                     for key, default_value in DEFAULT_SETTINGS.items():
                         if key in loaded_settings:
                             if isinstance(default_value, dict):
@@ -231,6 +266,26 @@ class PadSVGGeneratorApp:
             hole_dia = self.get_hole_dia()
             if hole_dia is None: return
 
+            pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
+            if not pads:
+                messagebox.showerror("Error", "No valid pad sizes entered.")
+                return
+
+            # --- Pre-generation check for oversized engravings ---
+            if self.settings.get("engraving_on", True):
+                oversized_engravings = check_for_oversized_engravings(pads, self.material_vars, self.settings)
+                if oversized_engravings and self.settings.get("show_engraving_warning", True):
+                    message = "Warning: The current font size is too large for some pads and the engraving will be skipped:\n\n"
+                    for mat, sizes in oversized_engravings.items():
+                        message += f"- {mat.replace('_', ' ').capitalize()}: {', '.join(map(str, sorted(sizes)))}\n"
+                    message += "\nDo you want to proceed?"
+
+                    dialog = ConfirmationDialog(self.root, "Engraving Size Warning", message)
+                    if not dialog.result:
+                        return # User clicked No/Cancel
+                    if dialog.dont_show_again.get():
+                        self.settings["show_engraving_warning"] = False
+
             width_val = float(self.width_entry.get())
             height_val = float(self.height_entry.get())
             
@@ -244,10 +299,6 @@ class PadSVGGeneratorApp:
                 messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
                 return
 
-            pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
-            if not pads:
-                messagebox.showerror("Error", "No valid pad sizes entered.")
-                return
 
             base = self.filename_entry.get().strip()
             if not base:
@@ -259,9 +310,11 @@ class PadSVGGeneratorApp:
                     messagebox.showerror("Nesting Error", f"Could not fit all '{material.replace('_',' ')}' pieces on the specified sheet size.")
                     return
 
-            save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs")
+            save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs", initialdir=self.settings.get("last_output_dir", ""))
             if not save_dir:
                 return
+            
+            self.settings["last_output_dir"] = save_dir # Save new path
 
             files_generated = False
             for material, var in self.material_vars.items():
@@ -271,6 +324,7 @@ class PadSVGGeneratorApp:
                     files_generated = True
             
             if files_generated:
+                self.save_settings() # Save all settings, including new path
                 messagebox.showinfo("Done", "SVGs generated successfully.")
             else:
                 messagebox.showwarning("No Materials Selected", "Please select at least one material.")
@@ -557,6 +611,37 @@ class LayerColorWindow:
         self.top.destroy()
 
 # --- Core SVG Generation Logic ---
+def get_disc_diameter(pad_size, material, settings):
+    if material == 'felt': return pad_size - settings["felt_offset"]
+    if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+    if material == 'leather':
+        wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+        felt_thickness_mm = get_felt_thickness_mm(settings)
+        diameter = pad_size + 2 * (felt_thickness_mm + wrap)
+        return round(diameter * 2) / 2
+    if material == 'exact_size': return pad_size
+    return 0
+
+def check_for_oversized_engravings(pads, material_vars, settings):
+    oversized = {}
+    for material, var in material_vars.items():
+        if not var.get(): continue
+        
+        font_size = settings["engraving_font_size"].get(material, 2.0)
+        oversized_sizes = set()
+
+        for pad in pads:
+            pad_size = pad['size']
+            diameter = get_disc_diameter(pad_size, material, settings)
+            radius = diameter / 2
+            # A simple heuristic: check if font height is > 80% of the radius
+            if font_size >= radius * 0.8:
+                oversized_sizes.add(pad_size)
+        
+        if oversized_sizes:
+            oversized[material] = oversized_sizes
+    return oversized
+
 
 def leather_back_wrap(pad_size, multiplier):
     base_wrap = 0
@@ -586,17 +671,7 @@ def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
     
     for pad in pads:
         pad_size, qty = pad['size'], pad['qty']
-        diameter = 0
-        if material == 'felt': diameter = pad_size - settings["felt_offset"]
-        elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
-        elif material == 'leather':
-            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
-            felt_thickness_mm = get_felt_thickness_mm(settings)
-            diameter = pad_size + 2 * (felt_thickness_mm + wrap)
-            diameter = round(diameter * 2) / 2
-        elif material == 'exact_size':
-            diameter = pad_size
-        else: continue
+        diameter = get_disc_diameter(pad_size, material, settings)
         for _ in range(qty): discs.append((pad_size, diameter))
 
     discs.sort(key=lambda x: -x[1])
@@ -625,17 +700,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
     for pad in pads:
         pad_size, qty = pad['size'], pad['qty']
-        diameter = 0
-        if material == 'felt': diameter = pad_size - settings["felt_offset"]
-        elif material == 'card': diameter = pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
-        elif material == 'leather':
-            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
-            felt_thickness_mm = get_felt_thickness_mm(settings)
-            diameter = pad_size + 2 * (felt_thickness_mm + wrap)
-            diameter = round(diameter * 2) / 2
-        elif material == 'exact_size':
-            diameter = pad_size
-        else: continue
+        diameter = get_disc_diameter(pad_size, material, settings)
         for _ in range(qty): discs.append((pad_size, diameter))
 
     discs.sort(key=lambda x: -x[1])
@@ -669,7 +734,9 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
         if hole_dia > 0:
             dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
 
-        if settings.get("engraving_on", True):
+        font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
+        # Final check to prevent drawing oversized engravings
+        if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
             value = engraving_settings['value']
@@ -685,8 +752,8 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                 offset_from_center = (r + hole_r) / 2
                 engraving_y = cy - offset_from_center
 
-            vertical_adjust = 0.7 
-            font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
+            # Adjust Y for better visual centering
+            vertical_adjust = font_size * 0.35
             
             dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
                              insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
