@@ -32,7 +32,12 @@ DEFAULT_SETTINGS = {
     "felt_thickness": 3.175,
     "felt_thickness_unit": "mm",
     "engraving_on": True,
-    "engraving_font_size": 2.0,
+    "engraving_font_size": {
+        "felt": 2.0,
+        "card": 2.0,
+        "leather": 2.0,
+        "exact_size": 2.0
+    },
     "engraving_location": {
         "felt": {"mode": "centered", "value": 0.0},
         "card": {"mode": "centered", "value": 0.0},
@@ -88,15 +93,19 @@ class PadSVGGeneratorApp:
                 with open(SETTINGS_FILE, 'r') as f:
                     loaded_settings = json.load(f)
                     settings = DEFAULT_SETTINGS.copy()
-                    for key, value in loaded_settings.items():
-                        if key in settings and isinstance(settings[key], dict) and isinstance(value, dict):
-                            settings[key].update(value)
-                        else:
-                            settings[key] = value
+                    # Deep update for nested dictionaries
+                    for key, default_value in DEFAULT_SETTINGS.items():
+                        if key in loaded_settings:
+                            if isinstance(default_value, dict):
+                                settings[key] = default_value.copy()
+                                settings[key].update(loaded_settings[key])
+                            else:
+                                settings[key] = loaded_settings[key]
                     return settings
             except (json.JSONDecodeError, TypeError):
                 return DEFAULT_SETTINGS.copy()
         return DEFAULT_SETTINGS.copy()
+
 
     def save_settings(self):
         try:
@@ -334,7 +343,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x600")
+        self.top.geometry("500x700")
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -365,7 +374,7 @@ class OptionsWindow:
         
         # --- Engraving variables ---
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
-        self.engraving_font_size_var = tk.DoubleVar(value=self.settings["engraving_font_size"])
+        self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
 
         self.create_option_widgets()
@@ -408,16 +417,23 @@ class OptionsWindow:
         # --- Engraving Section ---
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
-        engraving_frame.columnconfigure(1, weight=1)
         
-        tk.Checkbutton(engraving_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
-        tk.Label(engraving_frame, text="Label Font Size (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
-        tk.Entry(engraving_frame, textvariable=self.engraving_font_size_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
+        tk.Checkbutton(engraving_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
+
+        font_size_frame = tk.LabelFrame(engraving_frame, text="Font Sizes (mm)", bg="#F0EAD6", padx=5, pady=5)
+        font_size_frame.pack(fill='x', pady=5)
+        
+        materials = ['felt', 'card', 'leather', 'exact_size']
+        for i, material in enumerate(materials):
+            tk.Label(font_size_frame, text=f"{material.replace('_', ' ').capitalize()}:", bg="#F0EAD6").grid(row=i, column=0, sticky='w', padx=5, pady=2)
+            font_size_var = tk.DoubleVar(value=self.settings["engraving_font_size"].get(material, 2.0))
+            self.engraving_font_size_vars[material] = font_size_var
+            tk.Entry(font_size_frame, textvariable=font_size_var, width=8).grid(row=i, column=1, sticky='w', padx=5, pady=2)
+
 
         engraving_loc_frame = tk.LabelFrame(main_frame, text="Engraving Placement", bg="#F0EAD6", padx=5, pady=5)
         engraving_loc_frame.pack(fill="x", pady=5)
         
-        materials = ['felt', 'card', 'leather', 'exact_size']
         for material in materials:
             frame = tk.Frame(engraving_loc_frame, bg="#F0EAD6")
             frame.pack(fill='x', pady=2)
@@ -453,7 +469,9 @@ class OptionsWindow:
         
         # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
-        self.settings["engraving_font_size"] = self.engraving_font_size_var.get()
+        for material, var in self.engraving_font_size_vars.items():
+            self.settings["engraving_font_size"][material] = var.get()
+
         for material, vars in self.engraving_loc_vars.items():
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
@@ -475,7 +493,9 @@ class OptionsWindow:
             
             # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
-            self.engraving_font_size_var.set(DEFAULT_SETTINGS["engraving_font_size"])
+            for material, var in self.engraving_font_size_vars.items():
+                 var.set(DEFAULT_SETTINGS["engraving_font_size"][material])
+            
             for material, vars in self.engraving_loc_vars.items():
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
@@ -666,7 +686,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                 engraving_y = cy - offset_from_center
 
             vertical_adjust = 0.7 
-            font_size = settings.get("engraving_font_size", 2.0)
+            font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
             
             dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
                              insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
