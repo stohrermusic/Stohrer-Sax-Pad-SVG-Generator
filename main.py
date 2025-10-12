@@ -3,6 +3,8 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
+import time
+import random
 
 # --- Lightburn Color Palette ---
 LIGHTBURN_COLORS = [
@@ -34,6 +36,7 @@ DEFAULT_SETTINGS = {
     "engraving_on": True,
     "show_engraving_warning": True,
     "last_output_dir": "",
+    "resonance_clicks": 0, # Easter Egg Counter
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -64,6 +67,16 @@ DEFAULT_SETTINGS = {
 
 PRESET_FILE = "pad_presets.json"
 SETTINGS_FILE = "app_settings.json"
+
+# --- Easter Egg Constants ---
+RESONANCE_MESSAGES = [
+    "Resonance added!", "Pad resonance increased!", "More resonance now!",
+    "Timbral focus enhanced!", "Harmonic alignment optimized!", "Heavy mass screws ain't got shit on this!",
+    "Core vibrations synchronized!", "Nodal points stabilized!", "Overtone series enriched!",
+    "Sonic clarity has been improved!"
+]
+COOL_BLUE = "#E0F7FA"
+COOL_GREEN = "#E8F5E9"
 
 class ConfirmationDialog(tk.Toplevel):
     def __init__(self, parent, title, message):
@@ -104,10 +117,13 @@ class PadSVGGeneratorApp:
         self.root = root
         self.root.title("Stohrer Sax Pad SVG Generator")
         self.root.geometry("620x640")
-        self.root.configure(bg="#FFFDD0")
+        self.default_bg = "#FFFDD0"
+        self.root.configure(bg=self.default_bg)
 
         self.settings = self.load_settings()
         self.presets = self.load_presets()
+        
+        self.apply_resonance_theme() # Apply theme on startup
 
         self.create_widgets()
         self.create_menu()
@@ -148,6 +164,27 @@ class PadSVGGeneratorApp:
                 json.dump(self.settings, f, indent=2)
         except Exception as e:
             messagebox.showerror("Error Saving Settings", f"Could not save settings:\n{e}")
+            
+    def apply_resonance_theme(self):
+        clicks = self.settings.get("resonance_clicks", 0)
+        color = self.default_bg
+        if 10 <= clicks < 50:
+            color = COOL_BLUE
+        elif 50 <= clicks < 100:
+            color = COOL_GREEN
+
+        if color != self.default_bg:
+            self.set_background_color(self.root, color)
+
+    def set_background_color(self, parent, color):
+        parent.configure(bg=color)
+        for widget in parent.winfo_children():
+            # Only apply to widgets that support the 'background' option
+            # and aren't ttk widgets which have their own styling.
+            if isinstance(widget, (tk.Frame, tk.Label, tk.Radiobutton, tk.Checkbutton, tk.LabelFrame)):
+                widget.configure(bg=color)
+            if isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
+                self.set_background_color(widget, color)
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
@@ -158,14 +195,17 @@ class PadSVGGeneratorApp:
         options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
         options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
         options_menu.add_separator()
+        options_menu.add_command(label="Add Resonance...", command=self.open_resonance_window) # Easter Egg
+        options_menu.add_separator()
         options_menu.add_command(label="Exit", command=self.on_exit)
 
     def create_widgets(self):
-        tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg="#FFFDD0").pack(pady=5)
+        # This function remains largely the same, but we ensure frames use the default BG
+        tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
         self.pad_entry = tk.Text(self.root, height=10)
         self.pad_entry.pack(fill="x", padx=10)
 
-        preset_frame = tk.Frame(self.root, bg="#FFFDD0")
+        preset_frame = tk.Frame(self.root, bg=self.root.cget('bg'))
         preset_frame.pack(pady=10)
         
         tk.Button(preset_frame, text="Save as Preset", command=self.on_save_preset).pack(side="left", padx=5)
@@ -179,7 +219,7 @@ class PadSVGGeneratorApp:
         
         tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_preset).pack(side="left", padx=5)
 
-        tk.Label(self.root, text="Select materials:", bg="#FFFDD0").pack(pady=5)
+        tk.Label(self.root, text="Select materials:", bg=self.root.cget('bg')).pack(pady=5)
         self.material_vars = {
             'felt': tk.BooleanVar(value=True), 
             'card': tk.BooleanVar(value=True), 
@@ -187,49 +227,45 @@ class PadSVGGeneratorApp:
             'exact_size': tk.BooleanVar(value=False)
         }
         for m in self.material_vars:
-            tk.Checkbutton(self.root, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg="#FFFDD0").pack(anchor='w', padx=20)
+            tk.Checkbutton(self.root, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg=self.root.cget('bg')).pack(anchor='w', padx=20)
 
-        options_frame = tk.Frame(self.root, bg="#FFFDD0")
+        options_frame = tk.Frame(self.root, bg=self.root.cget('bg'))
         options_frame.pack(pady=10, fill='x', padx=10)
 
-        # Center Hole Selection UI
-        hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg="#FFFDD0", padx=5, pady=5)
+        hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg=self.root.cget('bg'), padx=5, pady=5)
         hole_frame.pack(fill="x")
         self.hole_var = tk.StringVar(value=self.settings["hole_option"])
         
-        tk.Radiobutton(hole_frame, text="None", variable=self.hole_var, value="No center holes", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="3.0mm", variable=self.hole_var, value="3.0mm", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="3.5mm", variable=self.hole_var, value="3.5mm", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="Custom:", variable=self.hole_var, value="Custom", bg="#FFFDD0", command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="None", variable=self.hole_var, value="No center holes", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.0mm", variable=self.hole_var, value="3.0mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.5mm", variable=self.hole_var, value="3.5mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="Custom:", variable=self.hole_var, value="Custom", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
         
         self.custom_hole_entry = tk.Entry(hole_frame, width=6)
         self.custom_hole_entry.insert(0, self.settings.get("custom_hole_size", "4.0"))
         self.custom_hole_entry.pack(side="left", padx=2)
-        tk.Label(hole_frame, text="mm", bg="#FFFDD0").pack(side="left")
+        tk.Label(hole_frame, text="mm", bg=self.root.cget('bg')).pack(side="left")
         self.toggle_custom_hole_entry()
 
-
-        # Sheet Size UI
-        sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg="#FFFDD0", padx=5, pady=5)
+        sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg=self.root.cget('bg'), padx=5, pady=5)
         sheet_frame.pack(fill="x", pady=(10,0))
-        # REMOVED columnconfigure weight to prevent expansion
 
-        self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg="#FFFDD0")
+        self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg=self.root.cget('bg'))
         self.unit_label.grid(row=0, column=0, sticky='w', padx=5)
         self.width_entry = tk.Entry(sheet_frame)
         self.width_entry.insert(0, self.settings["sheet_width"])
-        self.width_entry.grid(row=0, column=1, sticky='w') # Changed to sticky='w'
+        self.width_entry.grid(row=0, column=1, sticky='w')
 
-        self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg="#FFFDD0")
+        self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg=self.root.cget('bg'))
         self.height_label.grid(row=1, column=0, sticky='w', padx=5)
         self.height_entry = tk.Entry(sheet_frame)
         self.height_entry.insert(0, self.settings["sheet_height"])
-        self.height_entry.grid(row=1, column=1, sticky='w') # Changed to sticky='w'
+        self.height_entry.grid(row=1, column=1, sticky='w')
 
-        tk.Label(self.root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
+        tk.Label(self.root, text="Output filename base (no extension):", bg=self.root.cget('bg')).pack(pady=5)
         self.filename_entry = tk.Entry(self.root)
         self.filename_entry.insert(0, "my_pad_job")
-        self.filename_entry.pack(padx=10) # REMOVED fill="x"
+        self.filename_entry.pack(padx=10) 
 
         tk.Button(self.root, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
 
@@ -244,6 +280,9 @@ class PadSVGGeneratorApp:
 
     def open_color_window(self):
         LayerColorWindow(self.root, self.settings, self.save_settings)
+        
+    def open_resonance_window(self):
+        ResonanceWindow(self.root, self.settings, self.save_settings, self.apply_resonance_theme)
 
     def update_ui_from_settings(self):
         self.unit_label.config(text=f"Width ({self.settings['units']}):")
@@ -609,6 +648,74 @@ class LayerColorWindow:
         
         self.save_callback()
         self.top.destroy()
+        
+class ResonanceWindow(tk.Toplevel):
+    def __init__(self, parent, settings, save_callback, theme_callback):
+        super().__init__(parent)
+        self.settings = settings
+        self.save_callback = save_callback
+        self.theme_callback = theme_callback
+        self.parent = parent
+        
+        self.title("Resonance Chamber")
+        self.geometry("400x200")
+        self.configure(bg="#2c2c2c")
+        self.transient(parent)
+        self.grab_set()
+
+        main_frame = tk.Frame(self, bg="#2c2c2c")
+        main_frame.pack(expand=True)
+
+        res_button = tk.Button(main_frame, text="Add Resonance", command=self.start_resonance, font=("Helvetica", 14, "bold"), bg="#555555", fg="white", activebackground="#666666", activeforeground="white")
+        res_button.pack(pady=20, padx=40, ipadx=10, ipady=10)
+
+    def start_resonance(self):
+        self.withdraw() # Hide the resonance window
+        ResonanceProgressDialog(self.parent, self.settings, self.save_callback, self.theme_callback)
+        self.destroy()
+
+class ResonanceProgressDialog(tk.Toplevel):
+    def __init__(self, parent, settings, save_callback, theme_callback):
+        super().__init__(parent)
+        self.settings = settings
+        self.save_callback = save_callback
+        self.theme_callback = theme_callback
+        self.parent_app = parent.master # Get the main app instance
+        
+        self.title("Optimizing...")
+        self.geometry("300x100")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+        
+        tk.Label(self, text="Applying resonance...", bg="#F0EAD6").pack(pady=10)
+        self.progress = ttk.Progressbar(self, orient="horizontal", length=250, mode="determinate")
+        self.progress.pack(pady=5)
+        
+        self.update_progress(0)
+
+    def update_progress(self, val):
+        self.progress['value'] = val
+        if val < 100:
+            self.after(70, self.update_progress, val + 1)
+        else:
+            self.after(200, self.finish_resonance)
+            
+    def finish_resonance(self):
+        clicks = self.settings.get("resonance_clicks", 0) + 1
+        self.settings["resonance_clicks"] = clicks
+        self.save_callback()
+        
+        if clicks == 100:
+            messagebox.showinfo("Power Overwhelming", "You have become too powerful.")
+            self.parent_app.attributes('-alpha', 0.5) # Make window transparent
+            self.settings["resonance_clicks"] = 0
+            self.save_callback()
+        else:
+            messagebox.showinfo("Success", random.choice(RESONANCE_MESSAGES))
+
+        self.theme_callback() # Re-apply theme based on new count
+        self.destroy()
 
 # --- Core SVG Generation Logic ---
 def get_disc_diameter(pad_size, material, settings):
