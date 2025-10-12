@@ -73,9 +73,9 @@ RESONANCE_MESSAGES = [
     "Resonance added!", "Pad resonance increased!", "More resonance now!",
     "Timbral focus enhanced!", "Harmonic alignment optimized!", "Acoustic reflection matrix calibrated!",
     "Core vibrations synchronized!", "Nodal points stabilized!", "Overtone series enriched!",
-    "Sonic clarity has been improved!", "Relacquer devaluation reversed!", "Heavy mass screws ain't SHIT!", 
+    "Sonic clarity has been improved!", "Relacquer devaluation reversed!", "Heavy mass screws ain't SHIT!",
     "Now you don't even have to fit the neck!", "Let's call this the ULTRAhaul!", "Now safe to use hot glue!",
-    "Look at me!  I am the resonator now!"
+    "Look at me! I am the resonator now!"
 ]
 COOL_BLUE = "#E0F7FA"
 COOL_GREEN = "#E8F5E9"
@@ -176,7 +176,6 @@ class PadSVGGeneratorApp:
             color = COOL_GREEN
 
         self.set_background_color(self.root, color)
-        # Ensure main window transparency is reset if not at 100 clicks
         if clicks < 100:
             self.root.attributes('-alpha', 1.0)
 
@@ -441,9 +440,21 @@ class OptionsWindow:
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
+
+        # --- Main Layout Frames ---
+        # Bottom frame for fixed buttons
+        bottom_button_frame = tk.Frame(self.top, bg="#F0EAD6")
+        bottom_button_frame.pack(side="bottom", fill="x", pady=10, padx=10)
+        tk.Button(bottom_button_frame, text="Save", command=self.save_options).pack(side="left", padx=5)
+        tk.Button(bottom_button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=5)
+        tk.Button(bottom_button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=5)
         
-        self.canvas = tk.Canvas(self.top, bg="#F0EAD6", highlightthickness=0)
-        self.scrollbar = tk.Scrollbar(self.top, orient="vertical", command=self.canvas.yview)
+        # Top frame for the scrollable area
+        main_canvas_frame = tk.Frame(self.top)
+        main_canvas_frame.pack(side="top", fill="both", expand=True)
+
+        self.canvas = tk.Canvas(main_canvas_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(main_canvas_frame, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6", padx=10, pady=10)
 
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
@@ -538,17 +549,9 @@ class OptionsWindow:
             
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
-
-
-        button_frame = tk.Frame(main_frame, bg="#F0EAD6")
-        button_frame.pack(side="bottom", pady=10, fill='x')
-        button_frame.pack_propagate(False) # Prevent frame from shrinking
-        tk.Button(button_frame, text="Save", command=self.save_options).pack(side="left", padx=10)
-        tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
-        tk.Button(button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=10)
         
         advanced_button = tk.Button(main_frame, text="Advanced Users Only...", command=self.app.open_resonance_window)
-        advanced_button.pack(side="bottom", pady=(10,0))
+        advanced_button.pack(side="bottom", pady=(20,10)) # Add some padding
 
 
     def save_options(self):
@@ -660,18 +663,18 @@ class ResonanceWindow(tk.Toplevel):
         
         self.title("Resonance Chamber")
         self.geometry("400x200")
-        self.configure(bg="#F0EAD6") # Changed background
+        self.configure(bg="#F0EAD6")
         self.transient(parent)
         self.grab_set()
 
-        main_frame = tk.Frame(self, bg="#F0EAD6") # Changed background
+        main_frame = tk.Frame(self, bg="#F0EAD6")
         main_frame.pack(expand=True)
 
         res_button = tk.Button(main_frame, text="Add Resonance", command=self.start_resonance, font=("Helvetica", 14, "bold"))
         res_button.pack(pady=20, padx=40, ipadx=10, ipady=10)
 
     def start_resonance(self):
-        self.withdraw() # Hide the resonance window
+        self.withdraw()
         ResonanceProgressDialog(self.parent, self.settings, self.save_callback, self.theme_callback)
         self.destroy()
 
@@ -681,7 +684,7 @@ class ResonanceProgressDialog(tk.Toplevel):
         self.settings = settings
         self.save_callback = save_callback
         self.theme_callback = theme_callback
-        self.parent_app = parent # Corrected reference to main app window
+        self.parent_app = parent
         
         self.title("Optimizing...")
         self.geometry("300x100")
@@ -705,20 +708,52 @@ class ResonanceProgressDialog(tk.Toplevel):
     def finish_resonance(self):
         clicks = self.settings.get("resonance_clicks", 0) + 1
         self.settings["resonance_clicks"] = clicks
-        self.save_callback()
         
-        if clicks >= 100: # Changed to >= to be safe
+        if clicks >= 100:
             messagebox.showinfo("Power Overwhelming", "You have become too powerful.")
-            self.parent_app.attributes('-alpha', 0.5) # Make window transparent
-            self.settings["resonance_clicks"] = 0
-            self.save_callback()
+            self.destroy() # Close this window
+            # Start the "uninstall" process
+            UninstallResonanceDialog(self.parent_app, self.settings, self.save_callback, self.theme_callback)
         else:
+            self.save_callback()
             messagebox.showinfo("Success", random.choice(RESONANCE_MESSAGES))
+            self.theme_callback()
+            self.destroy()
 
-        self.theme_callback() # Re-apply theme based on new count
+class UninstallResonanceDialog(tk.Toplevel):
+    def __init__(self, parent, settings, save_callback, theme_callback):
+        super().__init__(parent)
+        self.settings = settings
+        self.save_callback = save_callback
+        self.theme_callback = theme_callback
+        
+        self.title("Resetting...")
+        self.geometry("300x100")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set() # This makes the main window unusable
+
+        tk.Label(self, text="Uninstalling resonance...", bg="#F0EAD6").pack(pady=10)
+        self.progress = ttk.Progressbar(self, orient="horizontal", length=250, mode="determinate")
+        self.progress.pack(pady=5)
+        self.update_progress(0)
+
+    def update_progress(self, val):
+        self.progress['value'] = val
+        if val < 100:
+            # 2 seconds total duration
+            self.after(20, self.update_progress, val + 1)
+        else:
+            self.after(200, self.finish_uninstall)
+
+    def finish_uninstall(self):
+        self.settings["resonance_clicks"] = 0
+        self.save_callback()
+        self.theme_callback()
         self.destroy()
 
 # --- Core SVG Generation Logic ---
+# ... (rest of the file is unchanged) ...
 def get_disc_diameter(pad_size, material, settings):
     if material == 'felt': return pad_size - settings["felt_offset"]
     if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
