@@ -71,9 +71,11 @@ SETTINGS_FILE = "app_settings.json"
 # --- Easter Egg Constants ---
 RESONANCE_MESSAGES = [
     "Resonance added!", "Pad resonance increased!", "More resonance now!",
-    "Timbral focus enhanced!", "Harmonic alignment optimized!", "Heavy mass screws ain't got shit on this!",
+    "Timbral focus enhanced!", "Harmonic alignment optimized!", "Acoustic reflection matrix calibrated!",
     "Core vibrations synchronized!", "Nodal points stabilized!", "Overtone series enriched!",
-    "Sonic clarity has been improved!"
+    "Sonic clarity has been improved!", "Relacquer devaluation reversed!", "Heavy mass screws ain't SHIT!", 
+    "Now you don't even have to fit the neck!", "Let's call this the ULTRAhaul!", "Now safe to use hot glue!",
+    "Look at me!  I am the resonator now!"
 ]
 COOL_BLUE = "#E0F7FA"
 COOL_GREEN = "#E8F5E9"
@@ -173,14 +175,15 @@ class PadSVGGeneratorApp:
         elif 50 <= clicks < 100:
             color = COOL_GREEN
 
-        if color != self.default_bg:
-            self.set_background_color(self.root, color)
+        self.set_background_color(self.root, color)
+        # Ensure main window transparency is reset if not at 100 clicks
+        if clicks < 100:
+            self.root.attributes('-alpha', 1.0)
+
 
     def set_background_color(self, parent, color):
         parent.configure(bg=color)
         for widget in parent.winfo_children():
-            # Only apply to widgets that support the 'background' option
-            # and aren't ttk widgets which have their own styling.
             if isinstance(widget, (tk.Frame, tk.Label, tk.Radiobutton, tk.Checkbutton, tk.LabelFrame)):
                 widget.configure(bg=color)
             if isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
@@ -195,12 +198,9 @@ class PadSVGGeneratorApp:
         options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
         options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
         options_menu.add_separator()
-        options_menu.add_command(label="Add Resonance...", command=self.open_resonance_window) # Easter Egg
-        options_menu.add_separator()
         options_menu.add_command(label="Exit", command=self.on_exit)
 
     def create_widgets(self):
-        # This function remains largely the same, but we ensure frames use the default BG
         tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
         self.pad_entry = tk.Text(self.root, height=10)
         self.pad_entry.pack(fill="x", padx=10)
@@ -276,7 +276,7 @@ class PadSVGGeneratorApp:
             self.custom_hole_entry.config(state='disabled')
 
     def open_options_window(self):
-        OptionsWindow(self.root, self.settings, self.update_ui_from_settings, self.save_settings)
+        OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, self.save_settings)
 
     def open_color_window(self):
         LayerColorWindow(self.root, self.settings, self.save_settings)
@@ -429,7 +429,8 @@ class PadSVGGeneratorApp:
                     messagebox.showerror("Error Deleting Preset", str(e))
 
 class OptionsWindow:
-    def __init__(self, parent, settings, update_callback, save_callback):
+    def __init__(self, parent, app, settings, update_callback, save_callback):
+        self.app = app
         self.settings = settings
         self.update_callback = update_callback
         self.save_callback = save_callback
@@ -441,7 +442,6 @@ class OptionsWindow:
         self.top.transient(parent)
         self.top.grab_set()
         
-        # Create a canvas and a scrollbar
         self.canvas = tk.Canvas(self.top, bg="#F0EAD6", highlightthickness=0)
         self.scrollbar = tk.Scrollbar(self.top, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6", padx=10, pady=10)
@@ -455,8 +455,6 @@ class OptionsWindow:
         
         self.top.bind('<MouseWheel>', self._on_mousewheel)
 
-
-        # --- Sizing variables ---
         self.unit_var = tk.StringVar(value=self.settings["units"])
         self.felt_offset_var = tk.DoubleVar(value=self.settings["felt_offset"])
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
@@ -465,7 +463,6 @@ class OptionsWindow:
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
-        # --- Engraving variables ---
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
@@ -507,7 +504,6 @@ class OptionsWindow:
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
 
-        # --- Engraving Section ---
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
         
@@ -546,9 +542,14 @@ class OptionsWindow:
 
         button_frame = tk.Frame(main_frame, bg="#F0EAD6")
         button_frame.pack(side="bottom", pady=10, fill='x')
+        button_frame.pack_propagate(False) # Prevent frame from shrinking
         tk.Button(button_frame, text="Save", command=self.save_options).pack(side="left", padx=10)
         tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
         tk.Button(button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=10)
+        
+        advanced_button = tk.Button(main_frame, text="Advanced Users Only...", command=self.app.open_resonance_window)
+        advanced_button.pack(side="bottom", pady=(10,0))
+
 
     def save_options(self):
         # Sizing
@@ -659,14 +660,14 @@ class ResonanceWindow(tk.Toplevel):
         
         self.title("Resonance Chamber")
         self.geometry("400x200")
-        self.configure(bg="#2c2c2c")
+        self.configure(bg="#F0EAD6") # Changed background
         self.transient(parent)
         self.grab_set()
 
-        main_frame = tk.Frame(self, bg="#2c2c2c")
+        main_frame = tk.Frame(self, bg="#F0EAD6") # Changed background
         main_frame.pack(expand=True)
 
-        res_button = tk.Button(main_frame, text="Add Resonance", command=self.start_resonance, font=("Helvetica", 14, "bold"), bg="#555555", fg="white", activebackground="#666666", activeforeground="white")
+        res_button = tk.Button(main_frame, text="Add Resonance", command=self.start_resonance, font=("Helvetica", 14, "bold"))
         res_button.pack(pady=20, padx=40, ipadx=10, ipady=10)
 
     def start_resonance(self):
@@ -680,7 +681,7 @@ class ResonanceProgressDialog(tk.Toplevel):
         self.settings = settings
         self.save_callback = save_callback
         self.theme_callback = theme_callback
-        self.parent_app = parent.master # Get the main app instance
+        self.parent_app = parent # Corrected reference to main app window
         
         self.title("Optimizing...")
         self.geometry("300x100")
@@ -706,7 +707,7 @@ class ResonanceProgressDialog(tk.Toplevel):
         self.settings["resonance_clicks"] = clicks
         self.save_callback()
         
-        if clicks == 100:
+        if clicks >= 100: # Changed to >= to be safe
             messagebox.showinfo("Power Overwhelming", "You have become too powerful.")
             self.parent_app.attributes('-alpha', 0.5) # Make window transparent
             self.settings["resonance_clicks"] = 0
