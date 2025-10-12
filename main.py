@@ -212,24 +212,24 @@ class PadSVGGeneratorApp:
         # Sheet Size UI
         sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg="#FFFDD0", padx=5, pady=5)
         sheet_frame.pack(fill="x", pady=(10,0))
-        sheet_frame.columnconfigure(1, weight=1)
+        # REMOVED columnconfigure weight to prevent expansion
 
         self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg="#FFFDD0")
         self.unit_label.grid(row=0, column=0, sticky='w', padx=5)
         self.width_entry = tk.Entry(sheet_frame)
         self.width_entry.insert(0, self.settings["sheet_width"])
-        self.width_entry.grid(row=0, column=1, sticky='ew')
+        self.width_entry.grid(row=0, column=1, sticky='w') # Changed to sticky='w'
 
         self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg="#FFFDD0")
         self.height_label.grid(row=1, column=0, sticky='w', padx=5)
         self.height_entry = tk.Entry(sheet_frame)
         self.height_entry.insert(0, self.settings["sheet_height"])
-        self.height_entry.grid(row=1, column=1, sticky='ew')
+        self.height_entry.grid(row=1, column=1, sticky='w') # Changed to sticky='w'
 
         tk.Label(self.root, text="Output filename base (no extension):", bg="#FFFDD0").pack(pady=5)
         self.filename_entry = tk.Entry(self.root)
         self.filename_entry.insert(0, "my_pad_job")
-        self.filename_entry.pack(fill="x", padx=10)
+        self.filename_entry.pack(padx=10) # REMOVED fill="x"
 
         tk.Button(self.root, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
 
