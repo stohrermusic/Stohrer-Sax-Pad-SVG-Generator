@@ -442,14 +442,15 @@ class OptionsWindow:
         self.top.grab_set()
 
         # --- Main Layout Frames ---
-        # Bottom frame for fixed buttons
         bottom_button_frame = tk.Frame(self.top, bg="#F0EAD6")
         bottom_button_frame.pack(side="bottom", fill="x", pady=10, padx=10)
+        
         tk.Button(bottom_button_frame, text="Save", command=self.save_options).pack(side="left", padx=5)
         tk.Button(bottom_button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=5)
+        
+        tk.Button(bottom_button_frame, text="Advanced", command=self.app.open_resonance_window).pack(side="right", padx=5)
         tk.Button(bottom_button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=5)
         
-        # Top frame for the scrollable area
         main_canvas_frame = tk.Frame(self.top)
         main_canvas_frame.pack(side="top", fill="both", expand=True)
 
@@ -549,10 +550,6 @@ class OptionsWindow:
             
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
-        
-        advanced_button = tk.Button(main_frame, text="Advanced Users Only...", command=self.app.open_resonance_window)
-        advanced_button.pack(side="bottom", pady=(20,10)) # Add some padding
-
 
     def save_options(self):
         # Sizing
