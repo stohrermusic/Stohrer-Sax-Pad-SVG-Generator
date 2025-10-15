@@ -19,6 +19,8 @@ If you wish to run this in linux with python3, you must also install python3-svg
 
 For Windows, put the .exe in a folder. Your presets and preferences will be saved in json files in that folder.  If you are upgrading from a previous version, simply replace the .exe and leave the .jsons and your old settings and presets will carry over.  
 
+For both Windows and Mac, you will need to get around the OS trying to prevent you from running "unsigned" programs since I am not going to pay a fee to be a "developer" to make that go away.  
+
 I have no idea how to code, this was made with chatbots. Hope it works for you!
 
 -Matt
