@@ -4,7 +4,7 @@ Generates SVGs for laser cutting saxophone felts, cards, and leathers. Current v
 
 Features: SVG creation, basic nesting, layout in proscribed space (unless it won't fit), save/delete pad presets, center hole options (none, 3.0mm, 3.5mm, custom), user-defined minimum pad size for center hole, select inches-cm-mm for sheet size, advanced options to change sizing rules, custom rules for size engraving on materials.  
 
-Update 1.375 corrected a few minor gui bugs.  
+Update 1.375 corrected a few minor gui bugs and adds MacOS version.  
 
 
 Should work with default settings for leather between .011"- .014", and sizing of leather disc assumes a .125" thick felt with cardstock between .010 and .025 being acceptable for overwrap, providing for a final pad thickness of .160" to .175" or so.
