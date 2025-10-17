@@ -13,13 +13,13 @@ You will need to apply your own feeds/speeds and kerf settings depending on your
 
 Make sure to enter the pad sizes like it suggests, e.g. "34.0 x 10" without the quotes, and each size on a different line.  If you use a comma rather than a decimal point, the value will be ignored.  
 
-Windows .exe and MacOS files both included as of the 1.375 release. Not sure how the macOS version is going to handle the json settings files.
+Windows is the intented OS, and there is no Mac version.
 
 If you wish to run this in linux with python3, you must also install python3-svgwrite and python3-tk, but I can provide no technical support.
 
 For Windows, put the .exe in a folder. Your presets and preferences will be saved in json files in that folder.  If you are upgrading from a previous version, simply replace the .exe and leave the .jsons and your old settings and presets will carry over.  
 
-For both Windows and Mac, you will need to get around the OS trying to prevent you from running "unsigned" programs since I am not going to pay a fee to be a "developer" to make that go away.  
+For Windows you get a warming against running "unsigned" programs since I am not going to pay a fee to be a "developer" to make that go away.  Only happens on first run.  
 
 I have no idea how to code, this was made with chatbots. Hope it works for you!
 
