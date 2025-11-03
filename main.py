@@ -37,6 +37,7 @@ DEFAULT_SETTINGS = {
     "show_engraving_warning": True,
     "last_output_dir": "",
     "resonance_clicks": 0, # Easter Egg Counter
+    "compatibility_mode": False, # For Inkscape/etc.
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -476,6 +477,7 @@ class OptionsWindow:
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
+        self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
 
@@ -550,6 +552,11 @@ class OptionsWindow:
             
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
+        
+        export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
+        export_frame.pack(fill="x", pady=5)
+        tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
+
 
     def save_options(self):
         # Sizing
@@ -569,6 +576,9 @@ class OptionsWindow:
         for material, vars in self.engraving_loc_vars.items():
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
+            
+        # Export
+        self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
 
         self.save_callback()
         self.update_callback()
@@ -593,6 +603,9 @@ class OptionsWindow:
             for material, vars in self.engraving_loc_vars.items():
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
+                 
+            # Export
+            self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
 
 
 class LayerColorWindow:
@@ -750,7 +763,6 @@ class UninstallResonanceDialog(tk.Toplevel):
         self.destroy()
 
 # --- Core SVG Generation Logic ---
-# ... (rest of the file is unchanged) ...
 def get_disc_diameter(pad_size, material, settings):
     if material == 'felt': return pad_size - settings["felt_offset"]
     if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
@@ -774,7 +786,6 @@ def check_for_oversized_engravings(pads, material_vars, settings):
             pad_size = pad['size']
             diameter = get_disc_diameter(pad_size, material, settings)
             radius = diameter / 2
-            # A simple heuristic: check if font height is > 80% of the radius
             if font_size >= radius * 0.8:
                 oversized_sizes.add(pad_size)
         
@@ -861,21 +872,39 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                 x += 1
             y += 1
 
-    dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
+    compatibility_mode = settings.get("compatibility_mode", False)
+    
+    if compatibility_mode:
+        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), viewBox=f"0 0 {width_mm} {height_mm}")
+        stroke_w = 0.1
+    else:
+        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
+        stroke_w = '0.1mm'
+
     layer_colors = settings.get("layer_colors", DEFAULT_SETTINGS["layer_colors"])
 
     for pad_size, cx, cy, r in placed:
-        dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width='0.1mm'))
+        
+        # --- Draw Circle (Outline) ---
+        if compatibility_mode:
+            dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+        else:
+            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
 
         hole_dia = 0
         if should_have_center_hole(pad_size, hole_dia_preset, settings):
             hole_dia = hole_dia_preset
 
+        # --- Draw Center Hole ---
         if hole_dia > 0:
-            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width='0.1mm'))
+            if compatibility_mode:
+                dwg.add(dwg.circle(center=(cx, cy), r=hole_dia / 2, stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
+            else:
+                dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
-        # Final check to prevent drawing oversized engravings
+        
+        # --- Draw Engraving Text ---
         if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
@@ -888,18 +917,25 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                 hole_r = hole_dia / 2 if hole_dia > 0 else 0
                 engraving_y = cy - (hole_r + value)
             else: # centered
-                hole_r = hole_dia / 2 if hole_dia > 0 else 1.75 # Use a small default if no hole for centering
+                hole_r = hole_dia / 2 if hole_dia > 0 else 1.75
                 offset_from_center = (r + hole_r) / 2
                 engraving_y = cy - offset_from_center
 
-            # Adjust Y for better visual centering
             vertical_adjust = font_size * 0.35
+            text_content = f"{pad_size:.1f}".rstrip('0').rstrip('.')
             
-            dwg.add(dwg.text(f"{pad_size:.1f}".rstrip('0').rstrip('.'),
-                             insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
-                             text_anchor="middle",
-                             font_size=f"{font_size}mm",
-                             fill=layer_colors[f'{material}_engraving']))
+            if compatibility_mode:
+                dwg.add(dwg.text(text_content,
+                                 insert=(cx, engraving_y + vertical_adjust),
+                                 text_anchor="middle",
+                                 font_size=font_size,
+                                 fill=layer_colors[f'{material}_engraving']))
+            else:
+                dwg.add(dwg.text(text_content,
+                                 insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
+                                 text_anchor="middle",
+                                 font_size=f"{font_size}mm",
+                                 fill=layer_colors[f'{material}_engraving']))
 
     dwg.save()
 
