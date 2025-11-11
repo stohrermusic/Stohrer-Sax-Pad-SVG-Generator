@@ -193,12 +193,17 @@ class PadSVGGeneratorApp:
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Import Presets...", command=self.on_import_presets)
+        file_menu.add_command(label="Export Presets...", command=self.on_export_presets)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.on_exit)
+
         options_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Options", menu=options_menu)
         options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
         options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
-        options_menu.add_separator()
-        options_menu.add_command(label="Exit", command=self.on_exit)
 
     def create_widgets(self):
         tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
@@ -310,7 +315,6 @@ class PadSVGGeneratorApp:
                 messagebox.showerror("Error", "No valid pad sizes entered.")
                 return
 
-            # --- Pre-generation check for oversized engravings ---
             if self.settings.get("engraving_on", True):
                 oversized_engravings = check_for_oversized_engravings(pads, self.material_vars, self.settings)
                 if oversized_engravings and self.settings.get("show_engraving_warning", True):
@@ -321,7 +325,7 @@ class PadSVGGeneratorApp:
 
                     dialog = ConfirmationDialog(self.root, "Engraving Size Warning", message)
                     if not dialog.result:
-                        return # User clicked No/Cancel
+                        return
                     if dialog.dont_show_again.get():
                         self.settings["show_engraving_warning"] = False
 
@@ -353,7 +357,7 @@ class PadSVGGeneratorApp:
             if not save_dir:
                 return
             
-            self.settings["last_output_dir"] = save_dir # Save new path
+            self.settings["last_output_dir"] = save_dir 
 
             files_generated = False
             for material, var in self.material_vars.items():
@@ -363,7 +367,7 @@ class PadSVGGeneratorApp:
                     files_generated = True
             
             if files_generated:
-                self.save_settings() # Save all settings, including new path
+                self.save_settings() 
                 messagebox.showinfo("Done", "SVGs generated successfully.")
             else:
                 messagebox.showwarning("No Materials Selected", "Please select at least one material.")
@@ -391,6 +395,19 @@ class PadSVGGeneratorApp:
                 return {}
         return {}
 
+    def save_presets(self):
+        try:
+            with open(PRESET_FILE, 'w') as f:
+                json.dump(self.presets, f, indent=2)
+            return True
+        except Exception as e:
+            messagebox.showerror("Error Saving Preset", str(e))
+            return False
+
+    def refresh_preset_menu(self):
+        self.preset_menu['values'] = list(self.presets.keys())
+        self.preset_menu.set("Load Preset")
+
     def on_save_preset(self):
         name = simpledialog.askstring("Save Preset", "Enter a name for this preset:")
         if name:
@@ -400,13 +417,9 @@ class PadSVGGeneratorApp:
                 return
             
             self.presets[name] = pad_text
-            try:
-                with open(PRESET_FILE, 'w') as f:
-                    json.dump(self.presets, f, indent=2)
-                self.preset_menu['values'] = list(self.presets.keys())
+            if self.save_presets():
+                self.refresh_preset_menu()
                 messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
-            except Exception as e:
-                messagebox.showerror("Error Saving Preset", str(e))
 
     def on_load_preset(self, selected_name):
         if selected_name in self.presets:
@@ -418,15 +431,53 @@ class PadSVGGeneratorApp:
         if selected and selected != "Load Preset":
             if messagebox.askyesno("Delete Preset", f"Are you sure you want to delete the preset '{selected}'?"):
                 del self.presets[selected]
-                try:
-                    with open(PRESET_FILE, 'w') as f:
-                        json.dump(self.presets, f, indent=2)
-                    self.preset_menu['values'] = list(self.presets.keys())
-                    self.preset_menu.set("Load Preset")
+                if self.save_presets():
+                    self.refresh_preset_menu()
                     self.pad_entry.delete("1.0", tk.END)
                     messagebox.showinfo("Preset Deleted", f"Preset '{selected}' deleted.")
-                except Exception as e:
-                    messagebox.showerror("Error Deleting Preset", str(e))
+                    
+    def on_import_presets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Presets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid preset dictionary.")
+
+            added_count = 0
+            renamed_count = 0
+            
+            for preset_name, preset_data in imported_presets.items():
+                new_name = preset_name
+                while new_name in self.presets:
+                    new_name += "*"
+                
+                if new_name != preset_name:
+                    renamed_count += 1
+                
+                self.presets[new_name] = preset_data
+                added_count += 1
+                
+            if self.save_presets():
+                self.refresh_preset_menu()
+                messagebox.showinfo("Import Successful", 
+                                  f"Import complete.\n\n"
+                                  f"Added: {added_count} presets\n"
+                                  f"Renamed due to conflicts: {renamed_count} presets")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import presets:\n{e}")
+
+    def on_export_presets(self):
+        ExportPresetsWindow(self.root, self.presets)
+
 
 class OptionsWindow:
     def __init__(self, parent, app, settings, update_callback, save_callback):
@@ -650,7 +701,7 @@ class LayerColorWindow:
             combo.grid(row=i, column=1, sticky='ew', padx=5)
             self.color_vars[key] = var
 
-        button_frame = tk.Frame(main_frame, bg="#F0EAD6")
+        button_frame = tk.Frame(self.top, bg="#F0EAD6")
         button_frame.grid(row=len(layer_map_keys), column=0, columnspan=2, pady=20)
         tk.Button(button_frame, text="Save", command=self.save_colors).pack(side="left", padx=10)
         tk.Button(button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=10)
@@ -761,6 +812,91 @@ class UninstallResonanceDialog(tk.Toplevel):
         self.save_callback()
         self.theme_callback()
         self.destroy()
+
+class ExportPresetsWindow(tk.Toplevel):
+    def __init__(self, parent, presets):
+        super().__init__(parent)
+        self.presets = presets
+        self.title("Export Presets")
+        self.geometry("400x500")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+
+        self.vars = {}
+
+        tk.Label(self, text="Select presets to export:", bg="#F0EAD6", font=("Helvetica", 12)).pack(pady=10)
+
+        button_frame = tk.Frame(self, bg="#F0EAD6")
+        button_frame.pack(pady=5)
+        tk.Button(button_frame, text="Select All", command=self.select_all).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Select None", command=self.select_none).pack(side="left", padx=5)
+
+        list_frame = tk.Frame(self, bg="#F0EAD6")
+        list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.canvas = tk.Canvas(list_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6")
+
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        if not presets:
+             tk.Label(self.scrollable_frame, text="No local presets found.", bg="#F0EAD6").pack(pady=10)
+        else:
+            for name in sorted(self.presets.keys()):
+                var = tk.BooleanVar()
+                cb = tk.Checkbutton(self.scrollable_frame, text=name, variable=var, bg="#F0EAD6")
+                cb.pack(anchor='w')
+                self.vars[name] = var
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.bind('<MouseWheel>', self._on_mousewheel)
+
+        export_button = tk.Button(self, text="Export Selected", command=self.export_selected, font=("Helvetica", 10, "bold"))
+        export_button.pack(pady=10)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def select_all(self):
+        for var in self.vars.values():
+            var.set(True)
+
+    def select_none(self):
+        for var in self.vars.values():
+            var.set(False)
+
+    def export_selected(self):
+        to_export = {}
+        for name, var in self.vars.items():
+            if var.get():
+                to_export[name] = self.presets[name]
+        
+        if not to_export:
+            messagebox.showwarning("No Selection", "Please select at least one preset to export.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            title="Save Presets As...",
+            defaultextension=".json",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialfile="pad_presets_export.json"
+        )
+        
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(to_export, f, indent=2)
+            messagebox.showinfo("Export Successful", f"Successfully exported {len(to_export)} presets.")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Could not export presets:\n{e}")
 
 # --- Core SVG Generation Logic ---
 def get_disc_diameter(pad_size, material, settings):
