@@ -5,6 +5,7 @@ from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
 import time
 import random
+import math
 
 # --- Lightburn Color Palette ---
 LIGHTBURN_COLORS = [
@@ -38,6 +39,11 @@ DEFAULT_SETTINGS = {
     "last_output_dir": "",
     "resonance_clicks": 0, # Easter Egg Counter
     "compatibility_mode": False, # For Inkscape/etc.
+    "darting_on": False,
+    "dart_max_size": 20.0,
+    "dart_count": 8,
+    "dart_depth_percent": 90.0,
+    "dart_width": 1.5,
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -488,7 +494,8 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x700")
+        # Increase height slightly for new frame
+        self.top.geometry("500x750") 
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -519,6 +526,7 @@ class OptionsWindow:
         
         self.top.bind('<MouseWheel>', self._on_mousewheel)
 
+        # --- Sizing variables ---
         self.unit_var = tk.StringVar(value=self.settings["units"])
         self.felt_offset_var = tk.DoubleVar(value=self.settings["felt_offset"])
         self.card_offset_var = tk.DoubleVar(value=self.settings["card_to_felt_offset"])
@@ -527,10 +535,19 @@ class OptionsWindow:
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
+        # --- Engraving variables ---
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
+        
+        # --- Darting variables ---
+        self.darting_on_var = tk.BooleanVar(value=self.settings.get("darting_on", False))
+        self.dart_max_size_var = tk.DoubleVar(value=self.settings.get("dart_max_size", 20.0))
+        self.dart_count_var = tk.IntVar(value=self.settings.get("dart_count", 8))
+        self.dart_depth_percent_var = tk.DoubleVar(value=self.settings.get("dart_depth_percent", 90.0))
+        self.dart_width_var = tk.DoubleVar(value=self.settings.get("dart_width", 1.5))
+
 
         self.create_option_widgets()
     
@@ -603,6 +620,26 @@ class OptionsWindow:
             
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
+            
+        # --- Leather Darting Section ---
+        dart_frame = tk.LabelFrame(main_frame, text="Leather Dart Settings", bg="#F0EAD6", padx=5, pady=5)
+        dart_frame.pack(fill="x", pady=5)
+        dart_frame.columnconfigure(1, weight=1)
+        
+        tk.Checkbutton(dart_frame, text="Add darts to leather", variable=self.darting_on_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w')
+        
+        tk.Label(dart_frame, text="Apply to pads smaller than (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(dart_frame, textvariable=self.dart_max_size_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
+        
+        tk.Label(dart_frame, text="Number of darts:", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Entry(dart_frame, textvariable=self.dart_count_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
+        
+        tk.Label(dart_frame, text="Dart depth (% of back wrap):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
+        tk.Entry(dart_frame, textvariable=self.dart_depth_percent_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
+        
+        tk.Label(dart_frame, text="Dart width at edge (mm):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
+        tk.Entry(dart_frame, textvariable=self.dart_width_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
+        
         
         export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
         export_frame.pack(fill="x", pady=5)
@@ -630,6 +667,13 @@ class OptionsWindow:
             
         # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
+        
+        # Darting
+        self.settings["darting_on"] = self.darting_on_var.get()
+        self.settings["dart_max_size"] = self.dart_max_size_var.get()
+        self.settings["dart_count"] = self.dart_count_var.get()
+        self.settings["dart_depth_percent"] = self.dart_depth_percent_var.get()
+        self.settings["dart_width"] = self.dart_width_var.get()
 
         self.save_callback()
         self.update_callback()
@@ -657,6 +701,13 @@ class OptionsWindow:
                  
             # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
+            
+            # Darting
+            self.darting_on_var.set(DEFAULT_SETTINGS.get("darting_on", False))
+            self.dart_max_size_var.set(DEFAULT_SETTINGS.get("dart_max_size", 20.0))
+            self.dart_count_var.set(DEFAULT_SETTINGS.get("dart_count", 8))
+            self.dart_depth_percent_var.set(DEFAULT_SETTINGS.get("dart_depth_percent", 90.0))
+            self.dart_width_var.set(DEFAULT_SETTINGS.get("dart_width", 1.5))
 
 
 class LayerColorWindow:
@@ -1072,6 +1123,59 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                                  text_anchor="middle",
                                  font_size=f"{font_size}mm",
                                  fill=layer_colors[f'{material}_engraving']))
+        
+        # --- Draw Darts (if applicable) ---
+        if (material == 'leather' and 
+            settings.get("darting_on", False) and 
+            pad_size < settings.get("dart_max_size", 0)):
+            
+            dart_count = settings.get("dart_count", 8)
+            dart_depth_percent = settings.get("dart_depth_percent", 90.0)
+            dart_width = settings.get("dart_width", 1.5)
+            
+            if dart_count > 0:
+                back_wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+                dart_depth = back_wrap * (dart_depth_percent / 100.0)
+                
+                if dart_depth > 0:
+                    outer_radius = r
+                    inner_radius = r - dart_depth
+                    dart_half_width = dart_width / 2
+                    
+                    # Calculate the half-angle of the dart's "V" at the outer edge
+                    # Use math.asin(half_width / radius) which is more accurate for this
+                    if dart_half_width < outer_radius:
+                        half_angle_rad = math.asin(dart_half_width / outer_radius)
+                    else:
+                        half_angle_rad = 0 # Avoid math domain error if width is too large
+
+                    angle_step = (2 * math.pi) / dart_count
+                    
+                    for i in range(dart_count):
+                        angle_rad = i * angle_step
+                        
+                        # Point 1 (Outer edge)
+                        angle1 = angle_rad - half_angle_rad
+                        p1_x = cx + outer_radius * math.cos(angle1)
+                        p1_y = cy + outer_radius * math.sin(angle1)
+                        
+                        # Point 2 (Inner point)
+                        p_inner_x = cx + inner_radius * math.cos(angle_rad)
+                        p_inner_y = cy + inner_radius * math.sin(angle_rad)
+                        
+                        # Point 3 (Outer edge)
+                        angle2 = angle_rad + half_angle_rad
+                        p2_x = cx + outer_radius * math.cos(angle2)
+                        p2_y = cy + outer_radius * math.sin(angle2)
+
+                        dart_color = layer_colors['leather_outline']
+
+                        if compatibility_mode:
+                            dwg.add(dwg.line(start=(p1_x, p1_y), end=(p_inner_x, p_inner_y), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(p_inner_x, p_inner_y), end=(p2_x, p2_y), stroke=dart_color, stroke_width=stroke_w))
+                        else:
+                            dwg.add(dwg.line(start=(f"{p1_x}mm", f"{p1_y}mm"), end=(f"{p_inner_x}mm", f"{p_inner_y}mm"), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(f"{p_inner_x}mm", f"{p_inner_y}mm"), end=(f"{p2_x}mm", f"{p2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
 
     dwg.save()
 
