@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
 import time
 import random
-import math # Keep math for now, it's used in resonance (though not strictly necessary)
+import math
 
 # --- Lightburn Color Palette ---
 LIGHTBURN_COLORS = [
@@ -39,7 +39,6 @@ DEFAULT_SETTINGS = {
     "last_output_dir": "",
     "resonance_clicks": 0, # Easter Egg Counter
     "compatibility_mode": False, # For Inkscape/etc.
-    # All darting keys have been removed
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -68,7 +67,8 @@ DEFAULT_SETTINGS = {
     }
 }
 
-PRESET_FILE = "pad_presets.json"
+PAD_PRESET_FILE = "pad_presets.json"
+KEY_PRESET_FILE = "key_height_library.json" # New file for key heights
 SETTINGS_FILE = "app_settings.json"
 
 # --- Easter Egg Constants ---
@@ -126,16 +126,18 @@ class PadSVGGeneratorApp:
         self.root.configure(bg=self.default_bg)
 
         self.settings = self.load_settings()
-        self.presets = self.load_presets()
+        self.pad_presets = self.load_presets(PAD_PRESET_FILE)
+        self.key_presets = self.load_presets(KEY_PRESET_FILE)
         
         self.apply_resonance_theme() # Apply theme on startup
 
-        self.create_widgets()
         self.create_menu()
+        self.create_widgets() # This will now create the tabbed interface
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
 
     def on_exit(self):
+        # Save settings from pad generator tab
         self.settings["sheet_width"] = self.width_entry.get()
         self.settings["sheet_height"] = self.height_entry.get()
         self.settings["hole_option"] = self.hole_var.get()
@@ -149,21 +151,19 @@ class PadSVGGeneratorApp:
             try:
                 with open(SETTINGS_FILE, 'r') as f:
                     loaded_settings = json.load(f)
-                    # Start with defaults, then update with loaded settings
                     settings = DEFAULT_SETTINGS.copy()
                     for key, default_value in DEFAULT_SETTINGS.items():
                         if key in loaded_settings:
                             if isinstance(default_value, dict):
-                                # Merge dictionaries (for layer_colors, etc.)
                                 settings[key] = default_value.copy()
                                 settings[key].update(loaded_settings[key])
                             else:
                                 settings[key] = loaded_settings[key]
                     
-                    # Clean up any old darting keys that might be in the file
                     dart_keys = [k for k in settings if k.startswith("dart_")]
                     for k in dart_keys:
-                        del settings[k]
+                        if k in settings:
+                            del settings[k]
                         
                     return settings
             except (json.JSONDecodeError, TypeError):
@@ -173,6 +173,11 @@ class PadSVGGeneratorApp:
 
     def save_settings(self):
         try:
+            dart_keys = [k for k in self.settings if k.startswith("dart_")]
+            for k in dart_keys:
+                 if k in self.settings:
+                    del self.settings[k]
+            
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(self.settings, f, indent=2)
         except Exception as e:
@@ -194,10 +199,21 @@ class PadSVGGeneratorApp:
     def set_background_color(self, parent, color):
         parent.configure(bg=color)
         for widget in parent.winfo_children():
-            if isinstance(widget, (tk.Frame, tk.Label, tk.Radiobutton, tk.Checkbutton, tk.LabelFrame)):
-                widget.configure(bg=color)
-            if isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
+            if isinstance(widget, (tk.Frame, tk.Label, tk.Radiobutton, tk.Checkbutton, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
+                try:
+                    # Set background for standard tk widgets
+                    widget.configure(bg=color)
+                except tk.TclError:
+                    # Attempt to style ttk widgets
+                    try:
+                        style_name = f"{widget.winfo_class()}.{color.upper()}"
+                        ttk.Style().configure(style_name, background=color)
+                        widget.configure(style=style_name)
+                    except tk.TclError:
+                        pass # Widget doesn't support styling
+            if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
                 self.set_background_color(widget, color)
+
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
@@ -205,9 +221,10 @@ class PadSVGGeneratorApp:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Import Presets...", command=self.on_import_presets)
-        file_menu.add_command(label="Export Presets...", command=self.on_export_presets)
+        file_menu.add_command(label="Import Pad Presets...", command=self.on_import_pad_presets)
+        file_menu.add_command(label="Export Pad Presets...", command=self.on_export_pad_presets)
         file_menu.add_separator()
+        # Key Height Import/Export moved to tab
         file_menu.add_command(label="Exit", command=self.on_exit)
 
         options_menu = tk.Menu(menubar, tearoff=0)
@@ -216,25 +233,48 @@ class PadSVGGeneratorApp:
         options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
 
     def create_widgets(self):
-        tk.Label(self.root, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
-        self.pad_entry = tk.Text(self.root, height=10)
+        self.notebook = ttk.Notebook(self.root)
+        
+        # --- Create Tab 1: Pad SVG Generator ---
+        self.pad_tab = ttk.Frame(self.notebook, style='App.TFrame')
+        self.notebook.add(self.pad_tab, text='Pad SVG Generator')
+        self.create_pad_generator_tab(self.pad_tab)
+
+        # --- Create Tab 2: Key Height Library ---
+        self.key_tab = ttk.Frame(self.notebook, style='App.TFrame')
+        self.notebook.add(self.key_tab, text='Key Height Library')
+        self.create_key_library_tab(self.key_tab)
+        
+        self.notebook.pack(expand=True, fill="both", padx=5, pady=5)
+        
+        # Apply theme colors to the new notebook tabs
+        style = ttk.Style()
+        style.configure('App.TFrame', background=self.root.cget('bg'))
+        style.map('TNotebook.Tab', background=[('selected', self.default_bg), ('!selected', self.default_bg)], foreground=[('selected', 'black')])
+        style.configure('TNotebook', background=self.root.cget('bg'))
+        
+        self.apply_resonance_theme() # Re-apply to make sure tabs get colored
+
+    def create_pad_generator_tab(self, parent):
+        tk.Label(parent, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
+        self.pad_entry = tk.Text(parent, height=10)
         self.pad_entry.pack(fill="x", padx=10)
 
-        preset_frame = tk.Frame(self.root, bg=self.root.cget('bg'))
+        preset_frame = tk.Frame(parent, bg=self.root.cget('bg'))
         preset_frame.pack(pady=10)
         
-        tk.Button(preset_frame, text="Save as Preset", command=self.on_save_preset).pack(side="left", padx=5)
+        tk.Button(preset_frame, text="Save as Preset", command=self.on_save_pad_preset).pack(side="left", padx=5)
         
-        preset_names = list(self.presets.keys())
-        self.preset_var = tk.StringVar()
-        self.preset_menu = ttk.Combobox(preset_frame, textvariable=self.preset_var, values=preset_names, state="readonly", width=20)
-        self.preset_menu.set("Load Preset")
-        self.preset_menu.pack(side="left", padx=5)
-        self.preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_preset(self.preset_var.get()))
+        preset_names = list(self.pad_presets.keys())
+        self.pad_preset_var = tk.StringVar()
+        self.pad_preset_menu = ttk.Combobox(preset_frame, textvariable=self.pad_preset_var, values=preset_names, state="readonly", width=20)
+        self.pad_preset_menu.set("Load Pad Preset")
+        self.pad_preset_menu.pack(side="left", padx=5)
+        self.pad_preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_preset(self.pad_preset_var.get(), self.pad_presets, self.pad_entry))
         
-        tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_preset).pack(side="left", padx=5)
+        tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_pad_preset).pack(side="left", padx=5)
 
-        tk.Label(self.root, text="Select materials:", bg=self.root.cget('bg')).pack(pady=5)
+        tk.Label(parent, text="Select materials:", bg=self.root.cget('bg')).pack(pady=5)
         self.material_vars = {
             'felt': tk.BooleanVar(value=True), 
             'card': tk.BooleanVar(value=True), 
@@ -242,9 +282,9 @@ class PadSVGGeneratorApp:
             'exact_size': tk.BooleanVar(value=False)
         }
         for m in self.material_vars:
-            tk.Checkbutton(self.root, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg=self.root.cget('bg')).pack(anchor='w', padx=20)
+            tk.Checkbutton(parent, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg=self.root.cget('bg')).pack(anchor='w', padx=20)
 
-        options_frame = tk.Frame(self.root, bg=self.root.cget('bg'))
+        options_frame = tk.Frame(parent, bg=self.root.cget('bg'))
         options_frame.pack(pady=10, fill='x', padx=10)
 
         hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg=self.root.cget('bg'), padx=5, pady=5)
@@ -277,12 +317,231 @@ class PadSVGGeneratorApp:
         self.height_entry.insert(0, self.settings["sheet_height"])
         self.height_entry.grid(row=1, column=1, sticky='w')
 
-        tk.Label(self.root, text="Output filename base (no extension):", bg=self.root.cget('bg')).pack(pady=5)
-        self.filename_entry = tk.Entry(self.root)
+        tk.Label(parent, text="Output filename base (no extension):", bg=self.root.cget('bg')).pack(pady=5)
+        self.filename_entry = tk.Entry(parent)
         self.filename_entry.insert(0, "my_pad_job")
         self.filename_entry.pack(padx=10) 
 
-        tk.Button(self.root, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
+        tk.Button(parent, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
+        
+    def create_key_library_tab(self, parent):
+        self.key_field_vars = {} # To store all StringVars
+        
+        # --- Preset Management Frame ---
+        preset_frame = tk.Frame(parent, bg=self.root.cget('bg'))
+        preset_frame.pack(pady=10)
+        
+        tk.Button(preset_frame, text="Save as Set", command=self.on_save_key_preset).pack(side="left", padx=5)
+        
+        preset_names = list(self.key_presets.keys())
+        self.key_preset_var = tk.StringVar()
+        self.key_preset_menu = ttk.Combobox(preset_frame, textvariable=self.key_preset_var, values=preset_names, state="readonly", width=20)
+        self.key_preset_menu.set("Load Key Set")
+        self.key_preset_menu.pack(side="left", padx=5)
+        self.key_preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_key_preset(self.key_preset_var.get()))
+        
+        tk.Button(preset_frame, text="Delete Set", command=self.on_delete_key_preset).pack(side="left", padx=5)
+        
+        # --- Import/Export Frame ---
+        io_frame = tk.Frame(parent, bg=self.root.cget('bg'))
+        io_frame.pack(pady=5)
+        tk.Button(io_frame, text="Import Sets...", command=self.on_import_key_sets).pack(side="left", padx=5)
+        tk.Button(io_frame, text="Export Sets...", command=self.on_export_key_sets).pack(side="left", padx=5)
+
+
+        # --- Main Data Entry Frame ---
+        data_frame = tk.Frame(parent, bg=self.root.cget('bg'), padx=10)
+        data_frame.pack(fill="both", expand=True)
+
+        # --- Horn Info Section ---
+        horn_info_frame = tk.LabelFrame(data_frame, text="Horn Info", bg=self.root.cget('bg'), padx=5, pady=5)
+        horn_info_frame.pack(fill="x", pady=5)
+        horn_info_frame.columnconfigure(1, weight=1)
+        
+        horn_fields = ["Make", "Model", "Size"]
+        for i, field in enumerate(horn_fields):
+            tk.Label(horn_info_frame, text=f"{field}:", bg=self.root.cget('bg')).grid(row=i, column=0, sticky='w', padx=5, pady=2)
+            var = tk.StringVar()
+            tk.Entry(horn_info_frame, textvariable=var).grid(row=i, column=1, sticky='ew', padx=5)
+            self.key_field_vars[field.lower()] = var
+
+        tk.Label(horn_info_frame, text="Notes:", bg=self.root.cget('bg')).grid(row=len(horn_fields), column=0, sticky='nw', padx=5, pady=2)
+        self.key_notes_entry = tk.Text(horn_info_frame, height=3)
+        self.key_notes_entry.grid(row=len(horn_fields), column=1, sticky='ew', padx=5, pady=2)
+        self.key_field_vars['notes'] = self.key_notes_entry # Text widget doesn't use StringVar
+
+        # --- Key Heights Section ---
+        key_height_frame = tk.LabelFrame(data_frame, text="Key Heights", bg=self.root.cget('bg'), padx=5, pady=5)
+        key_height_frame.pack(fill="x", pady=5)
+        key_height_frame.columnconfigure(1, weight=1)
+        key_height_frame.columnconfigure(3, weight=1)
+
+        self.key_unit_var = tk.StringVar(value="mm")
+        self.previous_key_unit = "mm" # To track for conversion
+        
+        unit_frame = tk.Frame(key_height_frame, bg=self.root.cget('bg'))
+        unit_frame.grid(row=0, column=0, columnspan=4, sticky='w', pady=5)
+        tk.Label(unit_frame, text="Units:", bg=self.root.cget('bg')).pack(side="left")
+        tk.Radiobutton(unit_frame, text="mm", variable=self.key_unit_var, value="mm", bg=self.root.cget('bg'), command=self.on_unit_convert).pack(side="left")
+        tk.Radiobutton(unit_frame, text="inches", variable=self.key_unit_var, value="in", bg=self.root.cget('bg'), command=self.on_unit_convert).pack(side="left")
+        
+        required_keys = ["B", "F", "Low C"]
+        optional_keys = ["Palm D", "Low Bb"]
+        
+        self.key_height_vars = {} # Store only the height StringVars for conversion
+        
+        tk.Label(key_height_frame, text="Required:", bg=self.root.cget('bg'), font=('Helvetica', 10, 'bold')).grid(row=1, column=0, columnspan=4, sticky='w', pady=5)
+        row_idx = 2
+        for key in required_keys:
+            tk.Label(key_height_frame, text=f"{key}:", bg=self.root.cget('bg')).grid(row=row_idx, column=0, sticky='w', padx=5, pady=2)
+            var = tk.StringVar()
+            tk.Entry(key_height_frame, textvariable=var, width=10).grid(row=row_idx, column=1, sticky='w', padx=5)
+            self.key_height_vars[key] = var
+            row_idx += 1
+
+        tk.Label(key_height_frame, text="Optional:", bg=self.root.cget('bg'), font=('Helvetica', 10, 'bold')).grid(row=row_idx, column=0, columnspan=4, sticky='w', pady=5)
+        row_idx += 1
+        for key in optional_keys:
+            tk.Label(key_height_frame, text=f"{key}:", bg=self.root.cget('bg')).grid(row=row_idx, column=0, sticky='w', padx=5, pady=2)
+            var = tk.StringVar()
+            tk.Entry(key_height_frame, textvariable=var, width=10).grid(row=row_idx, column=1, sticky='w', padx=5)
+            self.key_height_vars[key] = var
+            row_idx += 1
+
+    def on_unit_convert(self):
+        new_unit = self.key_unit_var.get()
+        old_unit = self.previous_key_unit
+
+        if new_unit == old_unit:
+            return
+
+        for var in self.key_height_vars.values():
+            try:
+                val = float(var.get())
+                if new_unit == "in" and old_unit == "mm":
+                    new_val = val / 25.4
+                    var.set(f"{new_val:.4f}") # More precision for inches
+                elif new_unit == "mm" and old_unit == "in":
+                    new_val = val * 25.4
+                    var.set(f"{new_val:.2f}")
+            except (ValueError, TypeError):
+                continue # Skip empty or invalid fields
+        
+        self.previous_key_unit = new_unit
+
+    def on_save_key_preset(self):
+        name = simpledialog.askstring("Save Key Height Set", "Enter a name for this set:")
+        if not name:
+            return
+
+        make = self.key_field_vars['make'].get()
+        model = self.key_field_vars['model'].get()
+        size = self.key_field_vars['size'].get()
+        
+        if not all([make, model, size]):
+            messagebox.showwarning("Missing Info", "Please fill in at least Make, Model, and Size before saving.")
+            return
+            
+        data = {
+            "make": make,
+            "model": model,
+            "size": size,
+            "notes": self.key_notes_entry.get("1.0", tk.END).strip(),
+            "units": self.key_unit_var.get(),
+            "heights": {key: var.get() for key, var in self.key_height_vars.items()}
+        }
+        
+        self.key_presets[name] = data
+        if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+            self.refresh_preset_menu(self.key_preset_menu, self.key_presets)
+            messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
+
+    def on_load_key_preset(self, selected_name):
+        if selected_name not in self.key_presets:
+            return
+            
+        data = self.key_presets[selected_name]
+        
+        self.key_field_vars['make'].set(data.get("make", ""))
+        self.key_field_vars['model'].set(data.get("model", ""))
+        self.key_field_vars['size'].set(data.get("size", ""))
+        
+        self.key_notes_entry.delete("1.0", tk.END)
+        self.key_notes_entry.insert(tk.END, data.get("notes", ""))
+        
+        unit = data.get("units", "mm")
+        self.key_unit_var.set(unit)
+        self.previous_key_unit = unit
+        
+        for key, var in self.key_height_vars.items():
+            var.set(data.get("heights", {}).get(key, ""))
+            
+    def on_delete_key_preset(self):
+        selected = self.key_preset_var.get()
+        if selected and selected != "Load Key Set":
+            if messagebox.askyesno("Delete Key Height Set", f"Are you sure you want to delete the set '{selected}'?"):
+                del self.key_presets[selected]
+                if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+                    self.refresh_preset_menu(self.key_preset_menu, self.key_presets)
+                    # Clear the form
+                    for var in self.key_field_vars.values():
+                        if isinstance(var, tk.StringVar):
+                            var.set("")
+                    self.key_notes_entry.delete("1.0", tk.END)
+                    for var in self.key_height_vars.values():
+                        var.set("")
+                    messagebox.showinfo("Preset Deleted", f"Preset '{selected}' deleted.")
+
+    def on_import_key_sets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Key Height Sets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid key height set file.")
+            
+            ImportPresetsWindow(self.root, self.key_presets, imported_presets, KEY_PRESET_FILE, self.key_preset_menu, self)
+
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import key sets:\n{e}")
+
+    def on_export_key_sets(self):
+        ExportKeySetsWindow(self.root, self.key_presets)
+                    
+    def on_import_pad_presets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Pad Presets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid preset dictionary.")
+            
+            # Use the new import window
+            ImportPresetsWindow(self.root, self.pad_presets, imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self)
+
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import presets:\n{e}")
+
+    def on_export_pad_presets(self):
+        ExportPadPresetsWindow(self.root, self.pad_presets)
+        
+    # ... (rest of the methods are for the pad generator) ...
 
     def toggle_custom_hole_entry(self):
         if self.hole_var.get() == "Custom":
@@ -396,97 +655,174 @@ class PadSVGGeneratorApp:
                 continue
         return pad_list
 
-    def load_presets(self):
-        if os.path.exists(PRESET_FILE):
+    def load_presets(self, file_path):
+        if os.path.exists(file_path):
             try:
-                with open(PRESET_FILE, 'r') as f:
+                with open(file_path, 'r') as f:
                     return json.load(f)
             except json.JSONDecodeError:
                 return {}
         return {}
 
-    def save_presets(self):
+    def save_presets(self, presets, file_path):
         try:
-            with open(PRESET_FILE, 'w') as f:
-                json.dump(self.presets, f, indent=2)
+            with open(file_path, 'w') as f:
+                json.dump(presets, f, indent=2)
             return True
         except Exception as e:
             messagebox.showerror("Error Saving Preset", str(e))
             return False
 
-    def refresh_preset_menu(self):
-        self.preset_menu['values'] = list(self.presets.keys())
-        self.preset_menu.set("Load Preset")
+    def refresh_preset_menu(self, menu_widget, presets):
+        menu_widget['values'] = list(presets.keys())
+        if "pad" in str(menu_widget): # Check variable name to decide label
+             menu_widget.set("Load Pad Preset")
+        else:
+             menu_widget.set("Load Key Set")
 
-    def on_save_preset(self):
-        name = simpledialog.askstring("Save Preset", "Enter a name for this preset:")
+
+    def on_save_preset(self, presets, file_path, entry_widget, menu_widget, preset_type_name):
+        name = simpledialog.askstring(f"Save {preset_type_name} Preset", "Enter a name for this preset:")
         if name:
-            pad_text = self.pad_entry.get("1.0", tk.END)
-            if not pad_text.strip():
-                messagebox.showwarning("Save Preset", "Cannot save an empty pad list.")
+            text_data = entry_widget.get("1.0", tk.END)
+            if not text_data.strip():
+                messagebox.showwarning(f"Save {preset_type_name} Preset", "Cannot save an empty list.")
                 return
             
-            self.presets[name] = pad_text
-            if self.save_presets():
-                self.refresh_preset_menu()
+            presets[name] = text_data
+            if self.save_presets(presets, file_path):
+                self.refresh_preset_menu(menu_widget, presets)
                 messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
 
-    def on_load_preset(self, selected_name):
-        if selected_name in self.presets:
-            self.pad_entry.delete("1.0", tk.END)
-            self.pad_entry.insert(tk.END, self.presets[selected_name])
+    def on_load_preset(self, selected_name, presets, entry_widget):
+        if selected_name in presets:
+            entry_widget.delete("1.0", tk.END)
+            entry_widget.insert(tk.END, presets[selected_name])
 
-    def on_delete_preset(self):
-        selected = self.preset_var.get()
-        if selected and selected != "Load Preset":
-            if messagebox.askyesno("Delete Preset", f"Are you sure you want to delete the preset '{selected}'?"):
-                del self.presets[selected]
-                if self.save_presets():
-                    self.refresh_preset_menu()
-                    self.pad_entry.delete("1.0", tk.END)
+    def on_delete_preset(self, presets, file_path, preset_var, menu_widget, entry_widget, preset_type_name):
+        selected = preset_var.get()
+        if selected and not selected.startswith("Load"):
+            if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected}'?"):
+                del presets[selected]
+                if self.save_presets(presets, file_path):
+                    self.refresh_preset_menu(menu_widget, presets)
+                    if isinstance(entry_widget, tk.Text):
+                        entry_widget.delete("1.0", tk.END)
                     messagebox.showinfo("Preset Deleted", f"Preset '{selected}' deleted.")
-                    
-    def on_import_presets(self):
+    
+    # --- Wrappers for new preset system ---
+    def on_save_pad_preset(self):
+        self.on_save_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_entry, self.pad_preset_menu, "Pad")
+        
+    def on_delete_pad_preset(self):
+        self.on_delete_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_preset_var, self.pad_preset_menu, self.pad_entry, "Pad")
+        
+    # Overridden load/save/delete for Key Heights
+    def on_load_key_preset(self, selected_name):
+        if selected_name not in self.key_presets:
+            return
+            
+        data = self.key_presets[selected_name]
+        
+        self.key_field_vars['make'].set(data.get("make", ""))
+        self.key_field_vars['model'].set(data.get("model", ""))
+        self.key_field_vars['size'].set(data.get("size", ""))
+        
+        self.key_notes_entry.delete("1.0", tk.END)
+        self.key_notes_entry.insert(tk.END, data.get("notes", ""))
+        
+        unit = data.get("units", "mm")
+        self.key_unit_var.set(unit)
+        self.previous_key_unit = unit
+        
+        for key, var in self.key_height_vars.items():
+            var.set(data.get("heights", {}).get(key, ""))
+            
+    def on_save_key_preset(self):
+        name = simpledialog.askstring("Save Key Height Set", "Enter a name for this set:")
+        if not name:
+            return
+
+        make = self.key_field_vars['make'].get()
+        model = self.key_field_vars['model'].get()
+        size = self.key_field_vars['size'].get()
+        
+        if not all([make, model, size]):
+            messagebox.showwarning("Missing Info", "Please fill in at least Make, Model, and Size before saving.")
+            return
+            
+        data = {
+            "make": make,
+            "model": model,
+            "size": size,
+            "notes": self.key_notes_entry.get("1.0", tk.END).strip(),
+            "units": self.key_unit_var.get(),
+            "heights": {key: var.get() for key, var in self.key_height_vars.items()}
+        }
+        
+        self.key_presets[name] = data
+        if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+            self.refresh_preset_menu(self.key_preset_menu, self.key_presets)
+            messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
+
+    def on_delete_key_preset(self):
+        selected = self.key_preset_var.get()
+        if selected and selected != "Load Key Set":
+            if messagebox.askyesno("Delete Key Height Set", f"Are you sure you want to delete the set '{selected}'?"):
+                del self.key_presets[selected]
+                if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+                    self.refresh_preset_menu(self.key_preset_menu, self.key_presets)
+                    # Clear the form
+                    for var in self.key_field_vars.values():
+                        if isinstance(var, tk.StringVar):
+                            var.set("")
+                    self.key_notes_entry.delete("1.0", tk.END)
+                    for var in self.key_height_vars.values():
+                        var.set("")
+                    messagebox.showinfo("Preset Deleted", f"Preset '{selected}' deleted.")
+
+    # --- Pad Preset Import/Export (from File Menu) ---
+    def on_import_pad_presets(self):
         filepath = filedialog.askopenfilename(
-            title="Import Presets",
+            title="Import Pad Presets",
             filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
             initialdir=self.settings.get("last_output_dir", "")
         )
         if not filepath:
             return
-
         try:
             with open(filepath, 'r') as f:
                 imported_presets = json.load(f)
-            
             if not isinstance(imported_presets, dict):
                 raise TypeError("File is not a valid preset dictionary.")
-
-            added_count = 0
-            renamed_count = 0
-            
-            for preset_name, preset_data in imported_presets.items():
-                new_name = preset_name
-                while new_name in self.presets:
-                    new_name += "*"
-                
-                if new_name != preset_name:
-                    renamed_count += 1
-                
-                self.presets[new_name] = preset_data
-                added_count += 1
-                
-            if self.save_presets():
-                self.refresh_preset_menu()
-                messagebox.showinfo("Import Successful", 
-                                  f"Import complete.\n\n"
-                                  f"Added: {added_count} presets\n"
-                                  f"Renamed due to conflicts: {renamed_count} presets")
+            # Use the new import window
+            ImportPresetsWindow(self.root, self.pad_presets, imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self, "Pad Preset")
         except Exception as e:
-            messagebox.showerror("Import Error", f"Could not import presets:\n{e}")
+            messagebox.showerror("Import Error", f"Could not import pad presets:\n{e}")
 
-    def on_export_presets(self):
-        ExportPresetsWindow(self.root, self.presets)
+    def on_export_pad_presets(self):
+        ExportPresetsWindow(self.root, self.pad_presets, "Pad Presets", "pad_preset_export.json")
+
+    # --- Key Height Import/Export (from Tab Buttons) ---
+    def on_import_key_sets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Key Height Sets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid key height set file.")
+            ImportPresetsWindow(self.root, self.key_presets, imported_presets, KEY_PRESET_FILE, self.key_preset_menu, self, "Key Height Set")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import key sets:\n{e}")
+
+    def on_export_key_sets(self):
+        ExportKeySetsWindow(self.root, self.key_presets)
 
 
 class OptionsWindow:
@@ -498,7 +834,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x700") # Adjusted height
+        self.top.geometry("500x700") 
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -544,9 +880,6 @@ class OptionsWindow:
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
         
-        # --- Darting variables ---
-        # Removed all darting tk variables
-
         self.create_option_widgets()
     
     def _on_mousewheel(self, event):
@@ -619,9 +952,6 @@ class OptionsWindow:
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
             
-        # --- Leather Darting Section ---
-        # This entire frame has been removed.
-        
         export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
         export_frame.pack(fill="x", pady=5)
         tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
@@ -649,8 +979,6 @@ class OptionsWindow:
         # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
         
-        # Darting (removed)
-
         self.save_callback()
         self.update_callback()
         self.top.destroy()
@@ -677,8 +1005,6 @@ class OptionsWindow:
                  
             # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
-            
-            # Darting (removed)
 
 
 class LayerColorWindow:
@@ -835,11 +1161,11 @@ class UninstallResonanceDialog(tk.Toplevel):
         self.theme_callback()
         self.destroy()
 
-class ExportPresetsWindow(tk.Toplevel):
+class ExportPadPresetsWindow(tk.Toplevel):
     def __init__(self, parent, presets):
         super().__init__(parent)
         self.presets = presets
-        self.title("Export Presets")
+        self.title("Export Pad Presets")
         self.geometry("400x500")
         self.configure(bg="#F0EAD6")
         self.transient(parent)
@@ -903,7 +1229,7 @@ class ExportPresetsWindow(tk.Toplevel):
             return
 
         filepath = filedialog.asksaveasfilename(
-            title="Save Presets As...",
+            title="Save Pad Presets As...",
             defaultextension=".json",
             filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
             initialfile="pad_presets_export.json"
@@ -919,6 +1245,209 @@ class ExportPresetsWindow(tk.Toplevel):
             self.destroy()
         except Exception as e:
             messagebox.showerror("Export Error", f"Could not export presets:\n{e}")
+
+class ExportKeySetsWindow(tk.Toplevel):
+    def __init__(self, parent, presets):
+        super().__init__(parent)
+        self.presets = presets
+        self.title("Export Key Height Sets")
+        self.geometry("400x500")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+
+        self.vars = {}
+
+        tk.Label(self, text="Select key sets to export:", bg="#F0EAD6", font=("Helvetica", 12)).pack(pady=10)
+
+        button_frame = tk.Frame(self, bg="#F0EAD6")
+        button_frame.pack(pady=5)
+        tk.Button(button_frame, text="Select All", command=self.select_all).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Select None", command=self.select_none).pack(side="left", padx=5)
+
+        list_frame = tk.Frame(self, bg="#F0EAD6")
+        list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.canvas = tk.Canvas(list_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6")
+
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        if not presets:
+             tk.Label(self.scrollable_frame, text="No local key sets found.", bg="#F0EAD6").pack(pady=10)
+        else:
+            for name in sorted(self.presets.keys()):
+                var = tk.BooleanVar()
+                cb = tk.Checkbutton(self.scrollable_frame, text=name, variable=var, bg="#F0EAD6")
+                cb.pack(anchor='w')
+                self.vars[name] = var
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.bind('<MouseWheel>', self._on_mousewheel)
+
+        export_button = tk.Button(self, text="Export Selected", command=self.export_selected, font=("Helvetica", 10, "bold"))
+        export_button.pack(pady=10)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def select_all(self):
+        for var in self.vars.values():
+            var.set(True)
+
+    def select_none(self):
+        for var in self.vars.values():
+            var.set(False)
+
+    def export_selected(self):
+        to_export = {}
+        selected_count = 0
+        last_selected_name = ""
+        for name, var in self.vars.items():
+            if var.get():
+                to_export[name] = self.presets[name]
+                selected_count += 1
+                last_selected_name = name
+        
+        if not to_export:
+            messagebox.showwarning("No Selection", "Please select at least one key set to export.")
+            return
+
+        user_name = simpledialog.askstring("Provenance", "Enter your name (for filename):")
+        if not user_name:
+            user_name = "Export" # Default if cancelled
+        
+        user_name = user_name.replace(" ", "_")
+        
+        if selected_count == 1:
+            # Try to build the Make_Model_Size_Name.json filename
+            try:
+                preset_data = to_export[last_selected_name]
+                make = preset_data.get("make", "UnknownMake").replace(" ", "_")
+                model = preset_data.get("model", "UnknownModel").replace(" ", "_")
+                size = preset_data.get("size", "UnknownSize").replace(" ", "_")
+                initialfile = f"{make}_{model}_{size}_{user_name}.json"
+            except Exception:
+                initialfile = f"key_height_export_{user_name}.json"
+        else:
+            initialfile = f"key_height_export_{user_name}.json"
+
+
+        filepath = filedialog.asksaveasfilename(
+            title="Save Key Height Sets As...",
+            defaultextension=".json",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialfile=initialfile
+        )
+        
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(to_export, f, indent=2)
+            messagebox.showinfo("Export Successful", f"Successfully exported {len(to_export)} key sets.")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Could not export key sets:\n{e}")
+
+class ImportPresetsWindow(tk.Toplevel):
+    def __init__(self, parent, local_presets, imported_presets, file_path, menu_widget, app_instance, preset_type_name):
+        super().__init__(parent)
+        self.parent_app = app_instance
+        self.local_presets = local_presets
+        self.imported_presets = imported_presets
+        self.file_path = file_path
+        self.menu_widget = menu_widget
+        self.preset_type_name = preset_type_name
+        
+        self.title(f"Import {preset_type_name}s")
+        self.geometry("450x500")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+
+        self.vars = {}
+
+        tk.Label(self, text=f"Select {preset_type_name}s to import:", bg="#F0EAD6", font=("Helvetica", 12)).pack(pady=10)
+
+        button_frame = tk.Frame(self, bg="#F0EAD6")
+        button_frame.pack(pady=5)
+        tk.Button(button_frame, text="Select All", command=self.select_all).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Select None", command=self.select_none).pack(side="left", padx=5)
+
+        list_frame = tk.Frame(self, bg="#F0EAD6")
+        list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.canvas = tk.Canvas(list_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6")
+
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        if not imported_presets:
+             tk.Label(self.scrollable_frame, text="No presets found in file.", bg="#F0EAD6").pack(pady=10)
+        else:
+            for name in sorted(self.imported_presets.keys()):
+                var = tk.BooleanVar(value=True) # Default to selected
+                cb = tk.Checkbutton(self.scrollable_frame, text=name, variable=var, bg="#F0EAD6")
+                cb.pack(anchor='w')
+                self.vars[name] = var
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.bind('<MouseWheel>', self._on_mousewheel)
+
+        import_button = tk.Button(self, text="Import Selected", command=self.import_selected, font=("Helvetica", 10, "bold"))
+        import_button.pack(pady=10)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def select_all(self):
+        for var in self.vars.values():
+            var.set(True)
+
+    def select_none(self):
+        for var in self.vars.values():
+            var.set(False)
+
+    def import_selected(self):
+        added_count = 0
+        renamed_count = 0
+        
+        for name, var in self.vars.items():
+            if var.get():
+                preset_data = self.imported_presets[name]
+                new_name = name
+                while new_name in self.local_presets:
+                    new_name += "*"
+                
+                if new_name != name:
+                    renamed_count += 1
+                
+                self.local_presets[new_name] = preset_data
+                added_count += 1
+        
+        if added_count > 0:
+            if self.parent_app.save_presets(self.local_presets, self.file_path):
+                self.parent_app.refresh_preset_menu(self.menu_widget, self.local_presets)
+                messagebox.showinfo("Import Successful", 
+                                  f"Import complete.\n\n"
+                                  f"Added: {added_count} presets\n"
+                                  f"Renamed due to conflicts: {renamed_count} presets")
+            else:
+                messagebox.showerror("Import Error", "Could not save new presets to file.")
+        else:
+            messagebox.showinfo("Import Complete", "No new presets were imported.")
+            
+        self.destroy()
 
 # --- Core SVG Generation Logic ---
 def get_disc_diameter(pad_size, material, settings):
