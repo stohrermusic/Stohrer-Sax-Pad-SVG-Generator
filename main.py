@@ -44,6 +44,7 @@ DEFAULT_SETTINGS = {
     "dart_count": 8,
     "dart_depth_percent": 90.0,
     "dart_width": 1.5,
+    "dart_inner_width": 1.0, # New setting for flat-bottomed darts
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -494,7 +495,6 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        # Increase height slightly for new frame
         self.top.geometry("500x750") 
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
@@ -547,7 +547,7 @@ class OptionsWindow:
         self.dart_count_var = tk.IntVar(value=self.settings.get("dart_count", 8))
         self.dart_depth_percent_var = tk.DoubleVar(value=self.settings.get("dart_depth_percent", 90.0))
         self.dart_width_var = tk.DoubleVar(value=self.settings.get("dart_width", 1.5))
-
+        self.dart_inner_width_var = tk.DoubleVar(value=self.settings.get("dart_inner_width", 1.0))
 
         self.create_option_widgets()
     
@@ -640,6 +640,9 @@ class OptionsWindow:
         tk.Label(dart_frame, text="Dart width at edge (mm):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
         tk.Entry(dart_frame, textvariable=self.dart_width_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
         
+        tk.Label(dart_frame, text="Dart inner width (mm):", bg="#F0EAD6").grid(row=5, column=0, sticky='w', pady=2)
+        tk.Entry(dart_frame, textvariable=self.dart_inner_width_var, width=10).grid(row=5, column=1, sticky='w', pady=2)
+        
         
         export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
         export_frame.pack(fill="x", pady=5)
@@ -674,6 +677,7 @@ class OptionsWindow:
         self.settings["dart_count"] = self.dart_count_var.get()
         self.settings["dart_depth_percent"] = self.dart_depth_percent_var.get()
         self.settings["dart_width"] = self.dart_width_var.get()
+        self.settings["dart_inner_width"] = self.dart_inner_width_var.get()
 
         self.save_callback()
         self.update_callback()
@@ -708,6 +712,7 @@ class OptionsWindow:
             self.dart_count_var.set(DEFAULT_SETTINGS.get("dart_count", 8))
             self.dart_depth_percent_var.set(DEFAULT_SETTINGS.get("dart_depth_percent", 90.0))
             self.dart_width_var.set(DEFAULT_SETTINGS.get("dart_width", 1.5))
+            self.dart_inner_width_var.set(DEFAULT_SETTINGS.get("dart_inner_width", 1.0))
 
 
 class LayerColorWindow:
@@ -1132,6 +1137,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             dart_count = settings.get("dart_count", 8)
             dart_depth_percent = settings.get("dart_depth_percent", 90.0)
             dart_width = settings.get("dart_width", 1.5)
+            dart_inner_width = settings.get("dart_inner_width", 1.0)
             
             if dart_count > 0:
                 back_wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
@@ -1140,42 +1146,54 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                 if dart_depth > 0:
                     outer_radius = r
                     inner_radius = r - dart_depth
-                    dart_half_width = dart_width / 2
+                    dart_half_width_outer = dart_width / 2
+                    dart_half_width_inner = dart_inner_width / 2
                     
                     # Calculate the half-angle of the dart's "V" at the outer edge
-                    # Use math.asin(half_width / radius) which is more accurate for this
-                    if dart_half_width < outer_radius:
-                        half_angle_rad = math.asin(dart_half_width / outer_radius)
+                    if dart_half_width_outer < outer_radius:
+                        half_angle_rad_outer = math.asin(dart_half_width_outer / outer_radius)
                     else:
-                        half_angle_rad = 0 # Avoid math domain error if width is too large
-
-                    angle_step = (2 * math.pi) / dart_count
+                        half_angle_rad_outer = 0 
                     
+                    angle_step = (2 * math.pi) / dart_count
+                    dart_color = layer_colors['leather_outline']
+
                     for i in range(dart_count):
                         angle_rad = i * angle_step
                         
-                        # Point 1 (Outer edge)
-                        angle1 = angle_rad - half_angle_rad
+                        # Point 1 (Outer edge left)
+                        angle1 = angle_rad - half_angle_rad_outer
                         p1_x = cx + outer_radius * math.cos(angle1)
                         p1_y = cy + outer_radius * math.sin(angle1)
                         
-                        # Point 2 (Inner point)
-                        p_inner_x = cx + inner_radius * math.cos(angle_rad)
-                        p_inner_y = cy + inner_radius * math.sin(angle_rad)
+                        # Point 2 (Inner edge left)
+                        # Perpendicular vector to the radial line
+                        perp_vec_x = -math.sin(angle_rad)
+                        perp_vec_y = math.cos(angle_rad)
+                        p_inner_center_x = cx + inner_radius * math.cos(angle_rad)
+                        p_inner_center_y = cy + inner_radius * math.sin(angle_rad)
                         
-                        # Point 3 (Outer edge)
-                        angle2 = angle_rad + half_angle_rad
+                        p_inner1_x = p_inner_center_x - perp_vec_x * dart_half_width_inner
+                        p_inner1_y = p_inner_center_y - perp_vec_y * dart_half_width_inner
+                        
+                        # Point 3 (Inner edge right)
+                        p_inner2_x = p_inner_center_x + perp_vec_x * dart_half_width_inner
+                        p_inner2_y = p_inner_center_y + perp_vec_y * dart_half_width_inner
+
+                        # Point 4 (Outer edge right)
+                        angle2 = angle_rad + half_angle_rad_outer
                         p2_x = cx + outer_radius * math.cos(angle2)
                         p2_y = cy + outer_radius * math.sin(angle2)
 
-                        dart_color = layer_colors['leather_outline']
 
                         if compatibility_mode:
-                            dwg.add(dwg.line(start=(p1_x, p1_y), end=(p_inner_x, p_inner_y), stroke=dart_color, stroke_width=stroke_w))
-                            dwg.add(dwg.line(start=(p_inner_x, p_inner_y), end=(p2_x, p2_y), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(p1_x, p1_y), end=(p_inner1_x, p_inner1_y), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(p_inner1_x, p_inner1_y), end=(p_inner2_x, p_inner2_y), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(p_inner2_x, p_inner2_y), end=(p2_x, p2_y), stroke=dart_color, stroke_width=stroke_w))
                         else:
-                            dwg.add(dwg.line(start=(f"{p1_x}mm", f"{p1_y}mm"), end=(f"{p_inner_x}mm", f"{p_inner_y}mm"), stroke=dart_color, stroke_width=stroke_w))
-                            dwg.add(dwg.line(start=(f"{p_inner_x}mm", f"{p_inner_y}mm"), end=(f"{p2_x}mm", f"{p2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(f"{p1_x}mm", f"{p1_y}mm"), end=(f"{p_inner1_x}mm", f"{p_inner1_y}mm"), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(f"{p_inner1_x}mm", f"{p_inner1_y}mm"), end=(f"{p_inner2_x}mm", f"{p_inner2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
+                            dwg.add(dwg.line(start=(f"{p_inner2_x}mm", f"{p_inner2_y}mm"), end=(f"{p2_x}mm", f"{p2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
 
     dwg.save()
 
