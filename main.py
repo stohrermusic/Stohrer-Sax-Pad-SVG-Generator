@@ -1652,14 +1652,14 @@ class ImportPresetsWindow(tk.Toplevel):
                         new_name = new_name.split("] ", 1)[1]
                     except Exception:
                         pass # Keep original name if split fails
-                
-                while new_name in self.local_presets:
+                        
+                while new_name in self.local_presets_lib:
                     new_name += "*"
                 
                 if new_name != name:
                     renamed_count += 1
                 
-                self.local_presets[new_name] = preset_data
+                self.local_presets_lib[new_name] = preset_data
                 added_count += 1
         
         if added_count > 0:
