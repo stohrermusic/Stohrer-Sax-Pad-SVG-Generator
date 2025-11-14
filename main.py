@@ -252,7 +252,7 @@ class PadSVGGeneratorApp:
                 except tk.TclError:
                     pass
 
-            if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
+            if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame, ttk.Notebook)):
                 self.set_background_color(widget, color)
 
 
