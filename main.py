@@ -1252,6 +1252,89 @@ class LayerColorWindow:
         
         self.save_callback()
         self.top.destroy()
+
+class KeyLayoutWindow:
+    def __init__(self, parent, settings, update_callback, save_callback):
+        self.settings = settings
+        self.update_callback = update_callback # This is rebuild_key_tab
+        self.save_callback = save_callback
+        
+        self.top = tk.Toplevel(parent)
+        self.top.title("Key Height Layout Options")
+        self.top.configure(bg="#F0EAD6")
+        self.top.transient(parent)
+        self.top.grab_set()
+        self.top.geometry("350x450") # Give it a reasonable default size
+
+        # --- Main Layout Frames ---
+        bottom_button_frame = tk.Frame(self.top, bg="#F0EAD6")
+        bottom_button_frame.pack(side="bottom", fill="x", pady=10, padx=10)
+        
+        tk.Button(bottom_button_frame, text="Save", command=self.save_options).pack(side="left", padx=5)
+        tk.Button(bottom_button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=5)
+
+        # Use a scrollable frame like in OptionsWindow, as the key list is long
+        main_canvas_frame = tk.Frame(self.top)
+        main_canvas_frame.pack(side="top", fill="both", expand=True, padx=10, pady=10)
+
+        self.canvas = tk.Canvas(main_canvas_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(main_canvas_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6", padx=10, pady=10)
+
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        self.top.bind('<MouseWheel>', self._on_mousewheel)
+
+        self.key_layout_vars = {}
+        # Get a copy to modify, matching the settings load logic
+        self.key_layout_settings = DEFAULT_SETTINGS["key_layout"].copy()
+        self.key_layout_settings.update(self.settings.get("key_layout", {}))
+
+
+        # --- Create Widgets ---
+        info_frame = tk.LabelFrame(self.scrollable_frame, text="Horn Info Layout", bg="#F0EAD6", padx=5, pady=5)
+        info_frame.pack(fill="x", pady=5)
+
+        # Serial Number Checkbox
+        var = tk.BooleanVar(value=self.key_layout_settings.get("show_serial", False))
+        self.key_layout_vars["show_serial"] = var
+        tk.Checkbutton(info_frame, text="Show 'Serial' field", variable=var, bg="#F0EAD6").pack(anchor='w')
+
+        # Large Notes Checkbox
+        var = tk.BooleanVar(value=self.key_layout_settings.get("large_notes", False))
+        self.key_layout_vars["large_notes"] = var
+        tk.Checkbutton(info_frame, text="Use large 'Notes' field", variable=var, bg="#F0EAD6").pack(anchor='w')
+
+        keys_frame = tk.LabelFrame(self.scrollable_frame, text="Visible Key Heights", bg="#F0EAD6", padx=5, pady=5)
+        keys_frame.pack(fill="x", pady=5, expand=True)
+
+        # Use ALL_KEY_HEIGHT_FIELDS to build the checkboxes
+        for key_name in ALL_KEY_HEIGHT_FIELDS:
+            setting_key = f"show_{key_name.replace(' ', '_')}"
+            # Default to True if the setting is somehow missing from the config
+            var = tk.BooleanVar(value=self.key_layout_settings.get(setting_key, True)) 
+            self.key_layout_vars[setting_key] = var
+            tk.Checkbutton(keys_frame, text=f"Show '{key_name}' field", variable=var, bg="#F0EAD6").pack(anchor='w')
+
+        
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def save_options(self):
+        # Update the settings dict from the vars
+        for key, var in self.key_layout_vars.items():
+            self.key_layout_settings[key] = var.get()
+        
+        self.settings["key_layout"] = self.key_layout_settings
+        
+        self.save_callback()
+        self.update_callback() # This will rebuild the key tab
+        self.top.destroy()
         
 class ResonanceWindow(tk.Toplevel):
     def __init__(self, parent, settings, save_callback, theme_callback):
