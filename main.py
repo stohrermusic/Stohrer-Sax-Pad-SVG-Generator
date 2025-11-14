@@ -1077,11 +1077,17 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
     for pad_size, cx, cy, r in placed:
         
+        # --- Check if darts are active for this pad ---
+        darts_active = (material == 'leather' and 
+                        settings.get("darting_on", False) and 
+                        pad_size < settings.get("dart_max_size", 0))
+
         # --- Draw Circle (Outline) ---
-        if compatibility_mode:
-            dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
-        else:
-            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+        if not darts_active: # Only draw the circle if darts are NOT active
+            if compatibility_mode:
+                dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+            else:
+                dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
 
         hole_dia = 0
         if should_have_center_hole(pad_size, hole_dia_preset, settings):
@@ -1097,10 +1103,15 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
         # --- Draw Engraving Text ---
-        if settings.get("engraving_on", True) and (font_size < r * 0.8):
+        # MODIFIED: Added 'and not darts_active' to prevent engraving on darted pads
+        if settings.get("engraving_on", True) and (font_size < r * 0.8) and not darts_active:
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
             value = engraving_settings['value']
+            
+            # This failsafe is no longer needed as we are skipping the engraving entirely
+            # if darts_active:
+            #     mode = 'centered'
             
             engraving_y = 0
             if mode == 'from_outside':
@@ -1130,10 +1141,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                                  fill=layer_colors[f'{material}_engraving']))
         
         # --- Draw Darts (if applicable) ---
-        if (material == 'leather' and 
-            settings.get("darting_on", False) and 
-            pad_size < settings.get("dart_max_size", 0)):
-            
+        if darts_active:
             dart_count = settings.get("dart_count", 8)
             dart_depth_percent = settings.get("dart_depth_percent", 90.0)
             dart_width = settings.get("dart_width", 1.5)
@@ -1149,7 +1157,6 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                     dart_half_width_outer = dart_width / 2
                     dart_half_width_inner = dart_inner_width / 2
                     
-                    # Calculate the half-angle of the dart's "V" at the outer edge
                     if dart_half_width_outer < outer_radius:
                         half_angle_rad_outer = math.asin(dart_half_width_outer / outer_radius)
                     else:
@@ -1167,7 +1174,6 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                         p1_y = cy + outer_radius * math.sin(angle1)
                         
                         # Point 2 (Inner edge left)
-                        # Perpendicular vector to the radial line
                         perp_vec_x = -math.sin(angle_rad)
                         perp_vec_y = math.cos(angle_rad)
                         p_inner_center_x = cx + inner_radius * math.cos(angle_rad)
@@ -1184,16 +1190,33 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                         angle2 = angle_rad + half_angle_rad_outer
                         p2_x = cx + outer_radius * math.cos(angle2)
                         p2_y = cy + outer_radius * math.sin(angle2)
-
+                        
+                        # --- Draw the dart and the arc segment ---
+                        # Get the start point of this tab (end point of the previous dart)
+                        prev_angle2 = (angle_rad - angle_step) + half_angle_rad_outer
+                        p_arc_start_x = cx + outer_radius * math.cos(prev_angle2)
+                        p_arc_start_y = cy + outer_radius * math.sin(prev_angle2)
 
                         if compatibility_mode:
+                            # Draw the trapezoid cutout
                             dwg.add(dwg.line(start=(p1_x, p1_y), end=(p_inner1_x, p_inner1_y), stroke=dart_color, stroke_width=stroke_w))
                             dwg.add(dwg.line(start=(p_inner1_x, p_inner1_y), end=(p_inner2_x, p_inner2_y), stroke=dart_color, stroke_width=stroke_w))
                             dwg.add(dwg.line(start=(p_inner2_x, p_inner2_y), end=(p2_x, p2_y), stroke=dart_color, stroke_width=stroke_w))
+                            
+                            # Draw the arc segment connecting this dart to the previous one
+                            path = dwg.path(d=f"M {p_arc_start_x},{p_arc_start_y} A {outer_radius},{outer_radius} 0 0 1 {p1_x},{p1_y}",
+                                            stroke=dart_color, fill="none", stroke_width=stroke_w)
+                            dwg.add(path)
                         else:
+                            # Draw the trapezoid cutout
                             dwg.add(dwg.line(start=(f"{p1_x}mm", f"{p1_y}mm"), end=(f"{p_inner1_x}mm", f"{p_inner1_y}mm"), stroke=dart_color, stroke_width=stroke_w))
                             dwg.add(dwg.line(start=(f"{p_inner1_x}mm", f"{p_inner1_y}mm"), end=(f"{p_inner2_x}mm", f"{p_inner2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
                             dwg.add(dwg.line(start=(f"{p_inner2_x}mm", f"{p_inner2_y}mm"), end=(f"{p2_x}mm", f"{p2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
+
+                            # Draw the arc segment
+                            path = dwg.path(d=f"M {p_arc_start_x}mm,{p_arc_start_y}mm A {outer_radius}mm,{outer_radius}mm 0 0 1 {p1_x}mm,{p1_y}mm",
+                                            stroke=dart_color, fill="none", stroke_width=stroke_w)
+                            dwg.add(path)
 
     dwg.save()
 
