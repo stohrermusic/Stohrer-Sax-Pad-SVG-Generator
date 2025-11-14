@@ -228,7 +228,13 @@ class PadSVGGeneratorApp:
 
 
     def set_background_color(self, parent, color):
-        parent.configure(bg=color)
+        try:
+            parent.configure(bg=color)
+        except tk.TclError:
+            # This widget is likely a ttk widget (like the Notebook)
+            # which can't be configured with -bg. We'll style its
+            # children widgets instead, which is handled below.
+            pass
         
         # Configure ttk styles
         style = ttk.Style()
