@@ -21,6 +21,13 @@ LIGHTBURN_COLORS = [
     ("27 - Teal", "#004754"), ("28 - Mint", "#86FA88"), ("29 - Pale Yellow", "#FFDB66")
 ]
 
+# --- Default Key Height Fields ---
+# All possible keys in their desired display order
+ALL_KEY_HEIGHT_FIELDS = [
+    "B", "F", "Palm F", "Palm E", "Palm Eb", "Palm D", 
+    "G", "D", "Low C", "Low B", "Low Bb"
+]
+
 # --- Default Configuration ---
 DEFAULT_SETTINGS = {
     "units": "in",
@@ -39,6 +46,23 @@ DEFAULT_SETTINGS = {
     "last_output_dir": "",
     "resonance_clicks": 0, # Easter Egg Counter
     "compatibility_mode": False, # For Inkscape/etc.
+    
+    "key_layout": {
+        "show_serial": False,
+        "large_notes": False,
+        "show_B": True, # Default on
+        "show_F": True, # Default on
+        "show_Palm F": False,
+        "show_Palm E": False,
+        "show_Palm Eb": False,
+        "show_Palm D": False,
+        "show_G": False,
+        "show_D": False,
+        "show_Low C": True, # Keep this on by default from old "required"
+        "show_Low B": False,
+        "show_Low Bb": False
+    },
+
     "engraving_font_size": {
         "felt": 2.0,
         "card": 2.0,
@@ -154,6 +178,11 @@ class PadSVGGeneratorApp:
                 with open(SETTINGS_FILE, 'r') as f:
                     loaded_settings = json.load(f)
                     settings = DEFAULT_SETTINGS.copy()
+                    
+                    # Ensure new nested dicts are created
+                    if "key_layout" not in loaded_settings:
+                        loaded_settings["key_layout"] = settings["key_layout"].copy()
+
                     for key, default_value in DEFAULT_SETTINGS.items():
                         if key in loaded_settings:
                             if isinstance(default_value, dict):
@@ -252,6 +281,10 @@ class PadSVGGeneratorApp:
         key_file_menu.add_command(label="Export Key Sets...", command=self.on_export_key_sets)
         key_file_menu.add_separator()
         key_file_menu.add_command(label="Exit", command=self.on_exit)
+        
+        key_options_menu = tk.Menu(self.key_menu, tearoff=0)
+        self.key_menu.add_cascade(label="Options", menu=key_options_menu)
+        key_options_menu.add_command(label="Layout Options...", command=self.open_key_layout_window)
 
     def on_tab_changed(self, event):
         """Called when the notebook tab is changed."""
@@ -365,6 +398,8 @@ class PadSVGGeneratorApp:
         
     def create_key_library_tab(self, parent):
         self.key_field_vars = {} # To store all StringVars
+        self.key_info_widgets = {} # To store Label/Entry widgets
+        self.key_height_widgets = {} # To store Label/Entry widgets
         
         # --- Preset Management Frame ---
         preset_frame = tk.Frame(parent, bg=self.root.cget('bg'))
@@ -394,59 +429,122 @@ class PadSVGGeneratorApp:
         data_frame.pack(fill="both", expand=True)
 
         # --- Horn Info Section ---
-        horn_info_frame = tk.LabelFrame(data_frame, text="Horn Info", bg=self.root.cget('bg'), padx=5, pady=5)
-        horn_info_frame.pack(fill="x", pady=5)
-        horn_info_frame.columnconfigure(1, weight=1)
+        self.horn_info_frame = tk.LabelFrame(data_frame, text="Horn Info", bg=self.root.cget('bg'), padx=5, pady=5)
+        self.horn_info_frame.pack(fill="x", pady=5)
+        self.horn_info_frame.columnconfigure(1, weight=1)
         
-        horn_fields = ["Make", "Model", "Size"]
-        for i, field in enumerate(horn_fields):
-            tk.Label(horn_info_frame, text=f"{field}:", bg=self.root.cget('bg')).grid(row=i, column=0, sticky='w', padx=5, pady=2)
-            var = tk.StringVar()
-            tk.Entry(horn_info_frame, textvariable=var).grid(row=i, column=1, sticky='ew', padx=5)
-            self.key_field_vars[field.lower()] = var
-
-        tk.Label(horn_info_frame, text="Notes:", bg=self.root.cget('bg')).grid(row=len(horn_fields), column=0, sticky='nw', padx=5, pady=2)
-        self.key_notes_entry = tk.Text(horn_info_frame, height=3)
-        self.key_notes_entry.grid(row=len(horn_fields), column=1, sticky='ew', padx=5, pady=2)
-        self.key_field_vars['notes'] = self.key_notes_entry # Text widget doesn't use StringVar
-
         # --- Key Heights Section ---
-        key_height_frame = tk.LabelFrame(data_frame, text="Key Heights", bg=self.root.cget('bg'), padx=5, pady=5)
-        key_height_frame.pack(fill="x", pady=5)
-        key_height_frame.columnconfigure(1, weight=1)
-        key_height_frame.columnconfigure(3, weight=1)
-
-        self.key_unit_var = tk.StringVar(value="mm")
-        self.previous_key_unit = "mm" # To track for conversion
+        self.key_height_frame = tk.LabelFrame(data_frame, text="Key Heights", bg=self.root.cget('bg'), padx=5, pady=5)
+        self.key_height_frame.pack(fill="x", pady=5)
+        self.key_height_frame.columnconfigure(1, weight=1)
+        self.key_height_frame.columnconfigure(3, weight=1)
         
-        unit_frame = tk.Frame(key_height_frame, bg=self.root.cget('bg'))
-        unit_frame.grid(row=0, column=0, columnspan=4, sticky='w', pady=5)
+        # --- Create ALL widgets (but don't show them all yet) ---
+        self.create_key_info_widgets()
+        self.create_key_height_widgets()
+        
+        # --- Apply initial layout settings ---
+        self.rebuild_key_tab()
+
+
+    def create_key_info_widgets(self):
+        frame = self.horn_info_frame
+        self.key_info_widgets = {} # Clear/init widget dict
+        
+        # --- Default ON fields ---
+        default_fields = ["Make", "Model", "Size"]
+        for i, field in enumerate(default_fields):
+            label = tk.Label(frame, text=f"{field}:", bg=self.root.cget('bg'))
+            var = tk.StringVar()
+            entry = tk.Entry(frame, textvariable=var)
+            self.key_field_vars[field.lower()] = var
+            self.key_info_widgets[field.lower()] = (label, entry)
+
+        # --- Optional "Serial" field ---
+        label = tk.Label(frame, text="Serial:", bg=self.root.cget('bg'))
+        var = tk.StringVar()
+        entry = tk.Entry(frame, textvariable=var)
+        self.key_field_vars["serial"] = var
+        self.key_info_widgets["serial"] = (label, entry)
+
+        # --- Default ON "Notes" field ---
+        label = tk.Label(frame, text="Notes:", bg=self.root.cget('bg'))
+        entry = tk.Text(frame, height=3)
+        self.key_field_vars['notes'] = entry
+        self.key_info_widgets['notes'] = (label, entry)
+
+    def create_key_height_widgets(self):
+        frame = self.key_height_frame
+        self.key_height_vars = {} # Clear/init dicts
+        self.key_height_widgets = {}
+        
+        # --- Unit Conversion (always on) ---
+        self.key_unit_var = tk.StringVar(value="mm")
+        self.previous_key_unit = "mm"
+        unit_frame = tk.Frame(frame, bg=self.root.cget('bg'))
         tk.Label(unit_frame, text="Units:", bg=self.root.cget('bg')).pack(side="left")
         tk.Radiobutton(unit_frame, text="mm", variable=self.key_unit_var, value="mm", bg=self.root.cget('bg'), command=self.on_unit_convert).pack(side="left")
         tk.Radiobutton(unit_frame, text="inches", variable=self.key_unit_var, value="in", bg=self.root.cget('bg'), command=self.on_unit_convert).pack(side="left")
-        
-        required_keys = ["B", "F", "Low C"]
-        optional_keys = ["Palm D", "Low Bb"]
-        
-        self.key_height_vars = {} # Store only the height StringVars for conversion
-        
-        tk.Label(key_height_frame, text="Required:", bg=self.root.cget('bg'), font=('Helvetica', 10, 'bold')).grid(row=1, column=0, columnspan=4, sticky='w', pady=5)
-        row_idx = 2
-        for key in required_keys:
-            tk.Label(key_height_frame, text=f"{key}:", bg=self.root.cget('bg')).grid(row=row_idx, column=0, sticky='w', padx=5, pady=2)
-            var = tk.StringVar()
-            tk.Entry(key_height_frame, textvariable=var, width=10).grid(row=row_idx, column=1, sticky='w', padx=5)
-            self.key_height_vars[key] = var
-            row_idx += 1
+        self.key_height_widgets['units'] = unit_frame # Store the whole frame
 
-        tk.Label(key_height_frame, text="Optional:", bg=self.root.cget('bg'), font=('Helvetica', 10, 'bold')).grid(row=row_idx, column=0, columnspan=4, sticky='w', pady=5)
-        row_idx += 1
-        for key in optional_keys:
-            tk.Label(key_height_frame, text=f"{key}:", bg=self.root.cget('bg')).grid(row=row_idx, column=0, sticky='w', padx=5, pady=2)
+        # --- Create ALL key height fields ---
+        for key in ALL_KEY_HEIGHT_FIELDS:
+            label = tk.Label(frame, text=f"{key}:", bg=self.root.cget('bg'))
             var = tk.StringVar()
-            tk.Entry(key_height_frame, textvariable=var, width=10).grid(row=row_idx, column=1, sticky='w', padx=5)
+            entry = tk.Entry(frame, textvariable=var, width=10)
             self.key_height_vars[key] = var
-            row_idx += 1
+            self.key_height_widgets[key] = (label, entry)
+
+    def rebuild_key_tab(self):
+        """ Hides or shows widgets based on settings """
+        layout_settings = self.settings.get("key_layout", DEFAULT_SETTINGS["key_layout"])
+
+        # --- Horn Info Section ---
+        # Clear frame
+        for widget in self.horn_info_frame.winfo_children():
+            widget.grid_remove()
+
+        row = 0
+        for field in ["make", "model", "size"]:
+            label, entry = self.key_info_widgets[field]
+            label.grid(row=row, column=0, sticky='w', padx=5, pady=2)
+            entry.grid(row=row, column=1, sticky='ew', padx=5)
+            row += 1
+        
+        if layout_settings.get("show_serial", False):
+            label, entry = self.key_info_widgets["serial"]
+            label.grid(row=row, column=0, sticky='w', padx=5, pady=2)
+            entry.grid(row=row, column=1, sticky='ew', padx=5)
+            row += 1
+            
+        notes_label, notes_entry = self.key_info_widgets["notes"]
+        notes_height = 6 if layout_settings.get("large_notes", False) else 3
+        notes_entry.config(height=notes_height)
+        notes_label.grid(row=row, column=0, sticky='nw', padx=5, pady=2)
+        notes_entry.grid(row=row, column=1, sticky='ew', padx=5)
+
+        # --- Key Heights Section ---
+        # Clear frame
+        for widget in self.key_height_frame.winfo_children():
+            widget.grid_remove()
+            
+        row = 0
+        self.key_height_widgets['units'].grid(row=row, column=0, columnspan=2, sticky='w', pady=5)
+        row += 1
+        
+        # Place visible keys in two columns
+        col = 0
+        for key in ALL_KEY_HEIGHT_FIELDS:
+            show_key = f"show_{key.replace(' ', '_')}"
+            if layout_settings.get(show_key, True): # Default to True if key missing
+                label, entry = self.key_height_widgets[key]
+                label.grid(row=row, column=col*2, sticky='w', padx=5, pady=2)
+                entry.grid(row=row, column=col*2 + 1, sticky='w', padx=5)
+                
+                col += 1
+                if col > 1: # Max 2 columns
+                    col = 0
+                    row += 1
 
     def on_unit_convert(self):
         new_unit = self.key_unit_var.get()
@@ -491,8 +589,10 @@ class PadSVGGeneratorApp:
             "make": make,
             "model": model,
             "size": size,
+            "serial": self.key_field_vars['serial'].get(),
             "notes": self.key_notes_entry.get("1.0", tk.END).strip(),
             "units": self.key_unit_var.get(),
+            # Save ALL keys, not just visible ones
             "heights": {key: var.get() for key, var in self.key_height_vars.items()}
         }
         
@@ -513,16 +613,14 @@ class PadSVGGeneratorApp:
         data = None
         
         if lib_name == "All Libraries":
-            # Name is in format "[Library] Preset Name"
             try:
                 lib_name, preset_name = selected_name.split("] ", 1)
-                lib_name = lib_name[1:] # Remove starting '['
+                lib_name = lib_name[1:]
                 if lib_name in self.key_presets and preset_name in self.key_presets[lib_name]:
                     data = self.key_presets[lib_name][preset_name]
             except ValueError:
-                return # Malformed name
+                return
         else:
-            # We are in a specific library
             if lib_name in self.key_presets and selected_name in self.key_presets[lib_name]:
                 data = self.key_presets[lib_name][selected_name]
 
@@ -531,6 +629,10 @@ class PadSVGGeneratorApp:
             self.key_field_vars['model'].set(data.get("model", ""))
             self.key_field_vars['size'].set(data.get("size", ""))
             
+            # Load serial only if its var exists (it always should)
+            if 'serial' in self.key_field_vars:
+                self.key_field_vars['serial'].set(data.get("serial", ""))
+            
             self.key_notes_entry.delete("1.0", tk.END)
             self.key_notes_entry.insert(tk.END, data.get("notes", ""))
             
@@ -538,6 +640,7 @@ class PadSVGGeneratorApp:
             self.key_unit_var.set(unit)
             self.previous_key_unit = unit
             
+            # Load all keys, even if hidden
             for key, var in self.key_height_vars.items():
                 var.set(data.get("heights", {}).get(key, ""))
             
@@ -677,6 +780,9 @@ class PadSVGGeneratorApp:
 
     def open_options_window(self):
         OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, self.save_settings)
+        
+    def open_key_layout_window(self):
+        KeyLayoutWindow(self.root, self.settings, self.rebuild_key_tab, self.save_settings)
 
     def open_color_window(self):
         LayerColorWindow(self.root, self.settings, self.save_settings)
@@ -781,7 +887,7 @@ class PadSVGGeneratorApp:
                 continue
         return pad_list
 
-    def load_presets(self, file_path, preset_type_name="Preset", is_flat=False): # is_flat is deprecated but safe
+    def load_presets(self, file_path, preset_type_name="Preset", is_flat=False): # is_flat is for pad presets
         data = {}
         if os.path.exists(file_path):
             try:
@@ -792,12 +898,9 @@ class PadSVGGeneratorApp:
             except (json.JSONDecodeError, TypeError):
                 data = {}
         
-        if not data:
-            return {"My Presets": {}} # Return default nested structure for a new file
-
-        # Check for migration:
-        # If data is not empty AND not all its values are dictionaries, it's the old flat format.
-        if data and not all(isinstance(v, dict) for v in data.values()):
+        # Check for migration
+        if data and not any(isinstance(v, dict) for v in data.values()):
+            # This is an OLD flat file. Migrate it.
             print(f"Migrating old {preset_type_name} file...")
             new_data = {"My Presets": data}
             if self.save_presets(new_data, file_path): # Save the migrated data
@@ -806,7 +909,6 @@ class PadSVGGeneratorApp:
             else:
                 return {"My Presets": {}} # Failed to migrate, return default
         
-        # It's already in the new nested format or it's empty
         return data if data else {"My Presets": {}}
 
 
@@ -820,7 +922,6 @@ class PadSVGGeneratorApp:
             return False
 
     def refresh_preset_menu(self, menu_widget, presets, preset_type_name="Preset"):
-        # This is now ONLY for Pad Presets
         menu_widget['values'] = list(presets.keys())
         menu_widget.set(f"Load {preset_type_name}")
 
@@ -853,7 +954,6 @@ class PadSVGGeneratorApp:
                 messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
 
     def on_load_preset(self, selected_name, presets, entry_widget, library_var, load_label):
-        # This is now ONLY for Pad Presets
         if not selected_name or selected_name == load_label:
             return
             
@@ -878,7 +978,6 @@ class PadSVGGeneratorApp:
             entry_widget.insert(tk.END, data)
 
     def on_delete_preset(self, presets, file_path, preset_var, menu_widget, entry_widget, preset_type_name, library_var, library_refresh_func):
-        # This is now ONLY for Pad Presets
         selected_lib = library_var.get()
         selected_preset = preset_var.get()
 
@@ -895,12 +994,15 @@ class PadSVGGeneratorApp:
                 return
         
         if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
-            del presets[selected_lib][selected_preset]
-            if self.save_presets(presets, file_path):
-                library_refresh_func() # Refresh preset list
-                if isinstance(entry_widget, tk.Text):
-                    entry_widget.delete("1.0", tk.END)
-                messagebox.showinfo("Preset Deleted", f"Preset '{selected_preset}' deleted.")
+            if selected_lib in presets and selected_preset in presets[selected_lib]:
+                del presets[selected_lib][selected_preset]
+                if self.save_presets(presets, file_path):
+                    library_refresh_func() # Refresh preset list
+                    if isinstance(entry_widget, tk.Text):
+                        entry_widget.delete("1.0", tk.END)
+                    messagebox.showinfo("Preset Deleted", f"Preset '{selected_preset}' deleted.")
+            else:
+                messagebox.showerror("Delete Error", "Could not find the preset to delete.")
     
     # --- Wrappers for new preset system ---
     def on_save_pad_preset(self):
@@ -1385,7 +1487,7 @@ class ImportPresetsWindow(tk.Toplevel):
     def __init__(self, parent, local_presets_lib, imported_presets, file_path, menu_widget, app_instance, preset_type_name="Preset", save_data=None):
         super().__init__(parent)
         self.parent_app = app_instance
-        self.local_presets_lib = local_presets_lib # This is the *specific library* (a dict) to import into
+        self.local_presets_lib = local_presets_lib # This is the specific library dict for key heights, or all presets for pads
         self.imported_presets = imported_presets # This is the dict of presets from the file
         self.file_path = file_path
         self.menu_widget = menu_widget
