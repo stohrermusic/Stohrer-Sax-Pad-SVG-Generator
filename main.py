@@ -1200,7 +1200,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                             dwg.add(dwg.line(start=(p_inner2_x, p_inner2_y), end=(p2_x, p2_y), stroke=dart_color, stroke_width=stroke_w))
                             
                             # Draw the arc segment connecting this dart to the previous one
-                            path = dwg.path(d=f"M {p_arc_start_x},{p_arc_start_y} A {outer_radius},{outer_radius} 0 0 1 {p1_x},{p1_y}",
+                            path = dwg.path(d=f"M {p_arc_start_x} {p_arc_start_y} A {outer_radius} {outer_radius} 0 0 1 {p1_x} {p1_y}",
                                             stroke=dart_color, fill="none", stroke_width=stroke_w)
                             dwg.add(path)
                         else:
@@ -1210,7 +1210,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
                             dwg.add(dwg.line(start=(f"{p_inner2_x}mm", f"{p_inner2_y}mm"), end=(f"{p2_x}mm", f"{p2_y}mm"), stroke=dart_color, stroke_width=stroke_w))
 
                             # Draw the arc segment
-                            path = dwg.path(d=f"M {p_arc_start_x}mm,{p_arc_start_y}mm A {outer_radius}mm,{outer_radius}mm 0 0 1 {p1_x}mm,{p1_y}mm",
+                            path = dwg.path(d=f"M {p_arc_start_x}mm {p_arc_start_y}mm A {outer_radius}mm {outer_radius}mm 0 0 1 {p1_x}mm {p1_y}mm",
                                             stroke=dart_color, fill="none", stroke_width=stroke_w)
                             dwg.add(path)
 
