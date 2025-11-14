@@ -129,10 +129,12 @@ class PadSVGGeneratorApp:
         self.pad_presets = self.load_presets(PAD_PRESET_FILE)
         self.key_presets = self.load_presets(KEY_PRESET_FILE)
         
-        self.apply_resonance_theme() # Apply theme on startup
-
-        self.create_menu()
+        self.create_menus()
         self.create_widgets() # This will now create the tabbed interface
+        
+        self.apply_resonance_theme() # Apply theme on startup
+        
+        self.root.config(menu=self.pad_menu) # Set initial menu
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
 
@@ -198,39 +200,66 @@ class PadSVGGeneratorApp:
 
     def set_background_color(self, parent, color):
         parent.configure(bg=color)
+        
+        # Configure ttk styles
+        style = ttk.Style()
+        style.configure('App.TFrame', background=color)
+        style.map('TNotebook.Tab', background=[('selected', color), ('!selected', color)], foreground=[('selected', 'black')])
+        style.configure('TNotebook', background=color)
+
         for widget in parent.winfo_children():
-            if isinstance(widget, (tk.Frame, tk.Label, tk.Radiobutton, tk.Checkbutton, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
+            widget_class = widget.winfo_class()
+            
+            if widget_class in ('Frame', 'Label', 'Radiobutton', 'Checkbutton', 'LabelFrame'):
                 try:
-                    # Set background for standard tk widgets
                     widget.configure(bg=color)
                 except tk.TclError:
-                    # Attempt to style ttk widgets
-                    try:
-                        style_name = f"{widget.winfo_class()}.{color.upper()}"
-                        ttk.Style().configure(style_name, background=color)
-                        widget.configure(style=style_name)
-                    except tk.TclError:
-                        pass # Widget doesn't support styling
+                    pass
+            elif widget_class in ('TFrame', 'TLabel', 'TRadiobutton', 'TCheckbutton', 'TLabelframe', 'TNotebook'):
+                try:
+                    style_name = f"{widget_class}.{color.upper()}"
+                    style.configure(style_name, background=color)
+                    widget.configure(style=style_name)
+                except tk.TclError:
+                    pass
+
             if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
                 self.set_background_color(widget, color)
 
 
-    def create_menu(self):
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+    def create_menus(self):
+        # --- Pad Generator Menu ---
+        self.pad_menu = tk.Menu(self.root)
+        
+        pad_file_menu = tk.Menu(self.pad_menu, tearoff=0)
+        self.pad_menu.add_cascade(label="File", menu=pad_file_menu)
+        pad_file_menu.add_command(label="Import Pad Presets...", command=self.on_import_pad_presets)
+        pad_file_menu.add_command(label="Export Pad Presets...", command=self.on_export_pad_presets)
+        pad_file_menu.add_separator()
+        pad_file_menu.add_command(label="Exit", command=self.on_exit)
 
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Import Pad Presets...", command=self.on_import_pad_presets)
-        file_menu.add_command(label="Export Pad Presets...", command=self.on_export_pad_presets)
-        file_menu.add_separator()
-        # Key Height Import/Export moved to tab
-        file_menu.add_command(label="Exit", command=self.on_exit)
+        pad_options_menu = tk.Menu(self.pad_menu, tearoff=0)
+        self.pad_menu.add_cascade(label="Options", menu=pad_options_menu)
+        pad_options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
+        pad_options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
 
-        options_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Options", menu=options_menu)
-        options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
-        options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
+        # --- Key Height Library Menu ---
+        self.key_menu = tk.Menu(self.root)
+        
+        key_file_menu = tk.Menu(self.key_menu, tearoff=0)
+        self.key_menu.add_cascade(label="File", menu=key_file_menu)
+        key_file_menu.add_command(label="Import Key Sets...", command=self.on_import_key_sets)
+        key_file_menu.add_command(label="Export Key Sets...", command=self.on_export_key_sets)
+        key_file_menu.add_separator()
+        key_file_menu.add_command(label="Exit", command=self.on_exit)
+
+    def on_tab_changed(self, event):
+        """Called when the notebook tab is changed."""
+        current_tab = self.notebook.index(self.notebook.select())
+        if current_tab == 0:
+            self.root.config(menu=self.pad_menu)
+        elif current_tab == 1:
+            self.root.config(menu=self.key_menu)
 
     def create_widgets(self):
         self.notebook = ttk.Notebook(self.root)
@@ -246,6 +275,7 @@ class PadSVGGeneratorApp:
         self.create_key_library_tab(self.key_tab)
         
         self.notebook.pack(expand=True, fill="both", padx=5, pady=5)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         
         # Apply theme colors to the new notebook tabs
         style = ttk.Style()
@@ -342,12 +372,7 @@ class PadSVGGeneratorApp:
         
         tk.Button(preset_frame, text="Delete Set", command=self.on_delete_key_preset).pack(side="left", padx=5)
         
-        # --- Import/Export Frame ---
-        io_frame = tk.Frame(parent, bg=self.root.cget('bg'))
-        io_frame.pack(pady=5)
-        tk.Button(io_frame, text="Import Sets...", command=self.on_import_key_sets).pack(side="left", padx=5)
-        tk.Button(io_frame, text="Export Sets...", command=self.on_export_key_sets).pack(side="left", padx=5)
-
+        # --- Import/Export buttons removed from here ---
 
         # --- Main Data Entry Frame ---
         data_frame = tk.Frame(parent, bg=self.root.cget('bg'), padx=10)
@@ -492,30 +517,7 @@ class PadSVGGeneratorApp:
                         var.set("")
                     messagebox.showinfo("Preset Deleted", f"Preset '{selected}' deleted.")
 
-    def on_import_key_sets(self):
-        filepath = filedialog.askopenfilename(
-            title="Import Key Height Sets",
-            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
-            initialdir=self.settings.get("last_output_dir", "")
-        )
-        if not filepath:
-            return
-
-        try:
-            with open(filepath, 'r') as f:
-                imported_presets = json.load(f)
-            
-            if not isinstance(imported_presets, dict):
-                raise TypeError("File is not a valid key height set file.")
-            
-            ImportPresetsWindow(self.root, self.key_presets, imported_presets, KEY_PRESET_FILE, self.key_preset_menu, self)
-
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Could not import key sets:\n{e}")
-
-    def on_export_key_sets(self):
-        ExportKeySetsWindow(self.root, self.key_presets)
-                    
+    # --- Pad Preset Import/Export (from File Menu) ---
     def on_import_pad_presets(self):
         filepath = filedialog.askopenfilename(
             title="Import Pad Presets",
@@ -524,22 +526,39 @@ class PadSVGGeneratorApp:
         )
         if not filepath:
             return
-
         try:
             with open(filepath, 'r') as f:
                 imported_presets = json.load(f)
-            
             if not isinstance(imported_presets, dict):
                 raise TypeError("File is not a valid preset dictionary.")
-            
             # Use the new import window
-            ImportPresetsWindow(self.root, self.pad_presets, imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self)
-
+            ImportPresetsWindow(self.root, self.pad_presets, imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self, "Pad Preset")
         except Exception as e:
-            messagebox.showerror("Import Error", f"Could not import presets:\n{e}")
+            messagebox.showerror("Import Error", f"Could not import pad presets:\n{e}")
 
     def on_export_pad_presets(self):
-        ExportPadPresetsWindow(self.root, self.pad_presets)
+        ExportPresetsWindow(self.root, self.pad_presets, "Pad Presets", "pad_preset_export.json")
+
+    # --- Key Height Import/Export (from File Menu) ---
+    def on_import_key_sets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Key Height Sets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid key height set file.")
+            ImportPresetsWindow(self.root, self.key_presets, imported_presets, KEY_PRESET_FILE, self.key_preset_menu, self, "Key Height Set")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import key sets:\n{e}")
+
+    def on_export_key_sets(self):
+        ExportKeySetsWindow(self.root, self.key_presets)
         
     # ... (rest of the methods are for the pad generator) ...
 
@@ -803,7 +822,7 @@ class PadSVGGeneratorApp:
     def on_export_pad_presets(self):
         ExportPresetsWindow(self.root, self.pad_presets, "Pad Presets", "pad_preset_export.json")
 
-    # --- Key Height Import/Export (from Tab Buttons) ---
+    # --- Key Height Import/Export (from File Menu) ---
     def on_import_key_sets(self):
         filepath = filedialog.askopenfilename(
             title="Import Key Height Sets",
@@ -1356,7 +1375,7 @@ class ExportKeySetsWindow(tk.Toplevel):
             messagebox.showerror("Export Error", f"Could not export key sets:\n{e}")
 
 class ImportPresetsWindow(tk.Toplevel):
-    def __init__(self, parent, local_presets, imported_presets, file_path, menu_widget, app_instance, preset_type_name):
+    def __init__(self, parent, local_presets, imported_presets, file_path, menu_widget, app_instance, preset_type_name="Preset"):
         super().__init__(parent)
         self.parent_app = app_instance
         self.local_presets = local_presets
