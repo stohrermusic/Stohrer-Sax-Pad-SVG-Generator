@@ -2,9 +2,9 @@ Stohrer-Sax-Pad-SVG-Generator
 Generates SVGs for laser cutting saxophone felts, cards, and leathers. Current version is 2.0.
 
 
-2.0, Major update!  Adds key heights tab, import/export features of pad set presets and key height data.  
+2.0, Major update!  Adds key heights library, import/export features of pad set presets and key height data.  
 
-Features: Pad leather/felt/card SVG creation, basic nesting, layout in proscribed space (unless it won't fit), save/delete pad presets, center hole options (none, 3.0mm, 3.5mm, custom), user-defined minimum pad size for center hole, select inches-cm-mm for sheet size, advanced options to change sizing rules, custom rules for size engraving on materials, import/export of pad set presets, multiple libraries of pad size presets, key heights libary tab, input/save of key heights by make/model/size with notes, import/export of pad height measurements, multiple libraries of pad height measurements.  
+Features: Pad leather/felt/card SVG creation, basic nesting, layout in proscribed space (unless it won't fit), save/delete pad presets, center hole options (none, 3.0mm, 3.5mm, custom), user-defined minimum pad size for center hole, select inches-cm-mm for sheet size, advanced options to change sizing rules, custom rules for size engraving on materials, import/export of pad set presets, multiple libraries of pad size presets, key heights libary with user-defined data fields, input/save of key heights by make/model/size with notes, import/export of pad height measurements, multiple libraries of pad height measurements.  
 
 
 SVG generation should work with default settings for leather between .011"- .014", and sizing of leather disc assumes a .125" thick felt with cardstock between .010 and .025 being acceptable for overwrap, providing for a final pad thickness of .160" to .175" or so.
