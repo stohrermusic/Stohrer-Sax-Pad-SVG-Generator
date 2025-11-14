@@ -761,14 +761,14 @@ class PadSVGGeneratorApp:
                 # Handle Key Height Library (nested)
                 if isinstance(data, dict):
                     # Check if it's the OLD flat structure
-                    if data and not any(isinstance(v, dict) for v in data.values()):
+                    if data and all(isinstance(v, dict) and "make" in v for v in data.values()):
                         # This is the old format, migrate it
                         print("Migrating old key height file...")
                         new_data = {"My Presets": data}
                         self.save_presets(new_data, file_path)
                         messagebox.showinfo("Library Updated", "Your existing key heights have been moved into a new library called 'My Presets'.")
                         return new_data
-                    # It's the new format
+                    # It's the new format, or empty
                     return data
                 
             except (json.JSONDecodeError, TypeError):
