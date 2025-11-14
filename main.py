@@ -761,11 +761,12 @@ class PadSVGGeneratorApp:
                 # Handle Key Height Library (nested)
                 if isinstance(data, dict):
                     # Check if it's the OLD flat structure
-                    if not any(isinstance(v, dict) for v in data.values()):
+                    if data and not any(isinstance(v, dict) for v in data.values()):
                         # This is the old format, migrate it
                         print("Migrating old key height file...")
-                        new_data = {"My Presets": data, "Uncategorized": {}}
+                        new_data = {"My Presets": data}
                         self.save_presets(new_data, file_path)
+                        messagebox.showinfo("Library Updated", "Your existing key heights have been moved into a new library called 'My Presets'.")
                         return new_data
                     # It's the new format
                     return data
@@ -777,7 +778,7 @@ class PadSVGGeneratorApp:
         if is_flat:
             return {}
         else:
-            return {"My Presets": {}, "Uncategorized": {}} # Default nested structure
+            return {"My Presets": {}} # Default nested structure
 
 
     def save_presets(self, presets, file_path):
@@ -1283,6 +1284,120 @@ class ExportPresetsWindow(tk.Toplevel):
             with open(filepath, 'w') as f:
                 json.dump(to_export, f, indent=2)
             messagebox.showinfo("Export Successful", f"Successfully exported {len(to_export)} sets.")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Could not export presets:\n{e}")
+
+class ExportKeySetsWindow(tk.Toplevel):
+    def __init__(self, parent, all_libraries):
+        super().__init__(parent)
+        self.all_libraries = all_libraries
+        self.title("Export Key Height Sets")
+        self.geometry("400x500")
+        self.configure(bg="#F0EAD6")
+        self.transient(parent)
+        self.grab_set()
+
+        self.vars = {}
+
+        tk.Label(self, text="Select sets to export:", bg="#F0EAD6", font=("Helvetica", 12)).pack(pady=10)
+
+        button_frame = tk.Frame(self, bg="#F0EAD6")
+        button_frame.pack(pady=5)
+        tk.Button(button_frame, text="Select All", command=self.select_all).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Select None", command=self.select_none).pack(side="left", padx=5)
+
+        list_frame = tk.Frame(self, bg="#F0EAD6")
+        list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.canvas = tk.Canvas(list_frame, bg="#F0EAD6", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6")
+
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        if not all_libraries:
+             tk.Label(self.scrollable_frame, text="No local key sets found.", bg="#F0EAD6").pack(pady=10)
+        else:
+            for lib_name in sorted(self.all_libraries.keys()):
+                tk.Label(self.scrollable_frame, text=f"[{lib_name}]", bg="#F0EAD6", font=("Helvetica", 10, "bold")).pack(anchor='w', pady=(5,0))
+                for preset_name in sorted(self.all_libraries[lib_name].keys()):
+                    var = tk.BooleanVar()
+                    full_name = f"{lib_name}::{preset_name}" # Internal delimiter
+                    cb = tk.Checkbutton(self.scrollable_frame, text=f"  {preset_name}", variable=var, bg="#F0EAD6")
+                    cb.pack(anchor='w')
+                    self.vars[full_name] = var
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.bind('<MouseWheel>', self._on_mousewheel)
+
+        export_button = tk.Button(self, text="Export Selected", command=self.export_selected, font=("Helvetica", 10, "bold"))
+        export_button.pack(pady=10)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def select_all(self):
+        for var in self.vars.values():
+            var.set(True)
+
+    def select_none(self):
+        for var in self.vars.values():
+            var.set(False)
+
+    def export_selected(self):
+        to_export = {}
+        selected_count = 0
+        last_selected_data = None
+        
+        for full_name, var in self.vars.items():
+            if var.get():
+                lib_name, preset_name = full_name.split("::", 1)
+                preset_data = self.all_libraries[lib_name][preset_name]
+                
+                # We will export as a flat structure
+                to_export[f"[{lib_name}] {preset_name}"] = preset_data
+                selected_count += 1
+                last_selected_data = preset_data
+        
+        if not to_export:
+            messagebox.showwarning("No Selection", "Please select at least one key set to export.")
+            return
+
+        user_name = simpledialog.askstring("Provenance", "Enter your name (for filename):")
+        if not user_name:
+            user_name = "Export" # Default if cancelled
+        user_name = user_name.replace(" ", "_")
+        
+        if selected_count == 1 and last_selected_data:
+            try:
+                make = last_selected_data.get("make", "UnknownMake").replace(" ", "_")
+                model = last_selected_data.get("model", "UnknownModel").replace(" ", "_")
+                size = last_selected_data.get("size", "UnknownSize").replace(" ", "_")
+                initialfile = f"{make}_{model}_{size}_{user_name}.json"
+            except Exception:
+                initialfile = f"key_height_export_{user_name}.json"
+        else:
+            initialfile = f"key_height_export_{user_name}.json"
+
+
+        filepath = filedialog.asksaveasfilename(
+            title=f"Save Key Height Sets As...",
+            defaultextension=".json",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialfile=initialfile
+        )
+        
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(to_export, f, indent=2)
+            messagebox.showinfo("Export Successful", f"Successfully exported {len(to_export)} key sets.")
             self.destroy()
         except Exception as e:
             messagebox.showerror("Export Error", f"Could not export presets:\n{e}")
