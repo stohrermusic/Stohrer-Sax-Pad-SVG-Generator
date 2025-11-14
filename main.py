@@ -596,7 +596,7 @@ class PadSVGGeneratorApp:
             "model": model,
             "size": size,
             "serial": self.key_field_vars['serial'].get(),
-            "notes": self.key_notes_entry.get("1.0", tk.END).strip(),
+            "notes": self.key_field_vars['notes'].get("1.0", tk.END).strip(),
             "units": self.key_unit_var.get(),
             # Save ALL keys, not just visible ones
             "heights": {key: var.get() for key, var in self.key_height_vars.items()}
@@ -639,8 +639,8 @@ class PadSVGGeneratorApp:
             if 'serial' in self.key_field_vars:
                 self.key_field_vars['serial'].set(data.get("serial", ""))
             
-            self.key_notes_entry.delete("1.0", tk.END)
-            self.key_notes_entry.insert(tk.END, data.get("notes", ""))
+            self.key_field_vars['notes'].delete("1.0", tk.END)
+            self.key_field_vars['notes'].insert(tk.END, data.get("notes", ""))
             
             unit = data.get("units", "mm")
             self.key_unit_var.set(unit)
