@@ -25,9 +25,11 @@ I have no idea how to code, this was made with chatbots. Hope it works for you!
 
 -Matt
 
-<img width="1542" height="1721" alt="image" src="https://github.com/user-attachments/assets/972bb354-b53b-46ac-b35d-efc574dbf93e" />
+<img width="1080" height="706" alt="image" src="https://github.com/user-attachments/assets/68b8fbfe-0c0d-4c32-aa97-b1df942a9512" />
 
-<img width="1544" height="1726" alt="image" src="https://github.com/user-attachments/assets/2c430d33-3f38-479c-a256-cd31d651f43a" />
+
+<img width="1080" height="829" alt="image" src="https://github.com/user-attachments/assets/3886a154-93c7-4729-89ff-a6f3c2ae9af0" />
+
 
 
 
