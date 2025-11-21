@@ -50,11 +50,12 @@ DEFAULT_SETTINGS = {
     "compatibility_mode": False,
     
     # NEW SETTINGS FOR v2.1
-    "darts_enabled": True,    # Master toggle for the feature
+    "darts_enabled": True,    # Master toggle
     "dart_threshold": 18.0,   
-    "dart_overwrap": 0.5,     # Updated default
-    "dart_wrap_bonus": 0.75,  # Updated default
-    "dart_frequency_multiplier": 1.0, # Default frequency scaler
+    "dart_overwrap": 0.5,     
+    "dart_wrap_bonus": 0.75,  
+    "dart_frequency_multiplier": 1.0, 
+    "dart_shape_factor": 0.0, # 0.0 = Sine, 1.0 = Square
     
     "key_layout": {
         "show_serial": False,
@@ -185,9 +186,10 @@ def save_presets(presets, file_path):
 # SECTION 2: LOGIC & MATH
 # ==========================================
 
-def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12):
+def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12, shape_factor=0.0):
     """
     Generates an SVG path string for a smooth Sine Wave (Flower) shape.
+    shape_factor: 0.0 = Sine, 1.0 = Flattened (Square-ish)
     """
     path_data = []
     
@@ -199,9 +201,22 @@ def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12):
     
     angle_step = (2 * math.pi) / steps
 
+    # Calculate power for shaping. 
+    # 0.0 -> Power 1.0 (Sine)
+    # 1.0 -> Power 0.1 (Square-ish)
+    power = 1.0 - (0.9 * shape_factor)
+
     for i in range(steps + 1):
         theta = i * angle_step
-        r = avg_r + amplitude * math.cos(num_points * theta)
+        
+        # Raw Sine Wave (-1 to 1)
+        raw_wave = math.cos(num_points * theta)
+        
+        # Apply Shaping: sign * |raw|^power
+        # This flattens the tops/bottoms as power gets closer to 0
+        shaped_wave = (1 if raw_wave >= 0 else -1) * (abs(raw_wave) ** power)
+        
+        r = avg_r + amplitude * shaped_wave
         
         x = cx + r * math.cos(theta)
         y = cy + r * math.sin(theta)
@@ -372,17 +387,16 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             if inner_r >= outer_r:
                  inner_r = outer_r - 0.2 
             
-            # 3. Dynamic Points
+            # 3. Dynamic Points & Shape
             circumference = 2 * math.pi * inner_r
-            # Get multiplier from settings
             freq_mult = settings.get("dart_frequency_multiplier", 1.0)
-            # Base calculation: one tooth every ~3.5mm, scaled by multiplier
             num_points = int((circumference / 3.5) * freq_mult)
-            
             if num_points < 12: num_points = 12 
             if num_points % 2 != 0: num_points += 1 
             
-            path_d = calculate_star_path(cx, cy, outer_r, inner_r, num_points=num_points)
+            shape_factor = settings.get("dart_shape_factor", 0.0)
+            
+            path_d = calculate_star_path(cx, cy, outer_r, inner_r, num_points=num_points, shape_factor=shape_factor)
             
             dwg.add(dwg.path(d=path_d, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
         else:
@@ -532,6 +546,7 @@ class OptionsWindow:
         self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 0.5))
         self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 0.75))
         self.dart_frequency_multiplier_var = tk.DoubleVar(value=self.settings.get("dart_frequency_multiplier", 1.0))
+        self.dart_shape_factor_var = tk.DoubleVar(value=self.settings.get("dart_shape_factor", 0.0))
         
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
@@ -594,6 +609,21 @@ class OptionsWindow:
         tk.Label(darts_frame, text="Star Frequency Multiplier (1.0=Default):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
         tk.Entry(darts_frame, textvariable=self.dart_frequency_multiplier_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
 
+        # Row 5: Shape Slider
+        shape_frame = tk.Frame(darts_frame, bg="#F0EAD6")
+        shape_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
+        
+        tk.Label(shape_frame, text="Shape:", bg="#F0EAD6").pack(side="left")
+        tk.Label(shape_frame, text="Sine", bg="#F0EAD6", font=("Arial", 8)).pack(side="left", padx=(5, 0))
+        
+        scale = tk.Scale(shape_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, 
+                         variable=self.dart_shape_factor_var, showvalue=0, 
+                         bg="#F0EAD6", highlightthickness=0, length=150, resolution=0.01)
+        scale.pack(side="left", fill="x", expand=True, padx=5)
+        
+        tk.Label(shape_frame, text="Square", bg="#F0EAD6", font=("Arial", 8)).pack(side="left")
+
+
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
         
@@ -650,6 +680,7 @@ class OptionsWindow:
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
         self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
         self.settings["dart_frequency_multiplier"] = self.dart_frequency_multiplier_var.get()
+        self.settings["dart_shape_factor"] = self.dart_shape_factor_var.get()
         
         # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
@@ -684,6 +715,7 @@ class OptionsWindow:
             self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 0.5))
             self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 0.75))
             self.dart_frequency_multiplier_var.set(DEFAULT_SETTINGS.get("dart_frequency_multiplier", 1.0))
+            self.dart_shape_factor_var.set(DEFAULT_SETTINGS.get("dart_shape_factor", 0.0))
             
             # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
