@@ -216,10 +216,12 @@ def get_disc_diameter(pad_size, material, settings):
     if material == 'exact_size': return pad_size
     
     if material == 'leather':
+        # Check if Star Pattern applies
         threshold = settings.get("dart_threshold", 18.0)
         
         if pad_size < threshold:
-            # DART BOOST: Add extra wrap for stars
+            # --- DART BOOST LOGIC ---
+            # Add extra material to base wrap for stars
             bonus = settings.get("dart_wrap_bonus", 1.5)
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"], extra_base=bonus)
         else:
@@ -262,7 +264,7 @@ def leather_back_wrap(pad_size, multiplier, extra_base=0.0):
     else:
         base_wrap = 1.0
         
-    # Apply the Dart Bonus before multiplier
+    # Apply the Dart Bonus (if any) before multiplier
     total_base = base_wrap + extra_base
     return total_base * multiplier
 
@@ -324,6 +326,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             x = spacing_mm
             while x + dia + spacing_mm <= width_mm:
                 cx, cy = x + r, y + r
+                # Check collision using standard circle r
                 is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
                 if not is_collision:
                     placed.append((pad_size, cx, cy, r))
@@ -358,7 +361,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             inner_r = felt_r + felt_thick + overwrap
             
             # 2. Outer Radius (Tip) - The Boosted Wrap
-            # 'r' comes from get_disc_diameter, which ALREADY includes the boost for stars
+            # 'r' is the full Boosted radius from get_disc_diameter
             outer_r = r
             
             # Safety Check
@@ -393,6 +396,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
+        # --- Draw Engraving Text ---
         if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
@@ -616,6 +620,7 @@ class OptionsWindow:
 
 
     def save_options(self):
+        # Sizing
         self.settings["units"] = self.unit_var.get()
         self.settings["felt_offset"] = self.felt_offset_var.get()
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
@@ -624,10 +629,12 @@ class OptionsWindow:
         self.settings["felt_thickness"] = self.felt_thickness_var.get()
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
+        # NEW SAVE LOGIC
         self.settings["dart_threshold"] = self.dart_threshold_var.get()
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
         self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
         
+        # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
         for material, var in self.engraving_font_size_vars.items():
             self.settings["engraving_font_size"][material] = var.get()
@@ -636,14 +643,16 @@ class OptionsWindow:
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
             
+        # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
         
-        self.save_callback()
+        save_settings(self.settings)
         self.update_callback()
         self.top.destroy()
 
     def revert_to_defaults(self):
         if messagebox.askyesno("Revert to Defaults", "Are you sure you want to revert all settings to their original defaults?"):
+            # Sizing
             self.unit_var.set(DEFAULT_SETTINGS["units"])
             self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
             self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
@@ -652,10 +661,12 @@ class OptionsWindow:
             self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
             
+            # NEW REVERT LOGIC
             self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
             self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 1.0))
             self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 1.5))
             
+            # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
             for material, var in self.engraving_font_size_vars.items():
                  var.set(DEFAULT_SETTINGS["engraving_font_size"][material])
@@ -664,6 +675,7 @@ class OptionsWindow:
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
                  
+            # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
 
 
@@ -801,7 +813,7 @@ class KeyLayoutWindow:
         
         self.settings["key_layout"] = self.key_layout_settings
         
-        self.save_callback()
+        save_settings(self.settings)
         self.update_callback() # This will rebuild the key tab
         self.top.destroy()
         
@@ -1127,7 +1139,7 @@ class ImportPresetsWindow(tk.Toplevel):
         
         if added_count > 0:
             # Use the imported save_presets function from config
-            if self.parent_app.save_presets(self.save_data, self.file_path):
+            if save_presets(self.save_data, self.file_path):
                 # Special refresh for key height library
                 if self.preset_type_name == "Key Height Set":
                     self.parent_app.update_key_library_dropdown()
@@ -1615,7 +1627,7 @@ class PadSVGGeneratorApp:
                 return
         
         self.key_presets[active_library][name] = data
-        if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+        if save_presets(self.key_presets, KEY_PRESET_FILE):
             self.on_key_library_selected() 
             messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully to '{active_library}'.")
 
@@ -1674,7 +1686,7 @@ class PadSVGGeneratorApp:
 
         if messagebox.askyesno("Delete Key Height Set", f"Are you sure you want to delete the set '{selected_preset}' from the '{selected_lib}' library?"):
             del self.key_presets[selected_lib][selected_preset]
-            if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+            if save_presets(self.key_presets, KEY_PRESET_FILE):
                 self.on_key_library_selected() 
                 # Clear the form
                 for var in self.key_field_vars.values():
@@ -1790,16 +1802,16 @@ class PadSVGGeneratorApp:
             self.custom_hole_entry.config(state='disabled')
 
     def open_options_window(self):
-        OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, lambda: self.save_settings())
+        OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, lambda: save_settings(self.settings))
         
     def open_key_layout_window(self):
-        KeyLayoutWindow(self.root, self.settings, self.rebuild_key_tab, lambda: self.save_settings())
+        KeyLayoutWindow(self.root, self.settings, self.rebuild_key_tab, lambda: save_settings(self.settings))
 
     def open_color_window(self):
-        LayerColorWindow(self.root, self.settings, lambda: self.save_settings())
+        LayerColorWindow(self.root, self.settings, lambda: save_settings(self.settings))
         
     def open_resonance_window(self):
-        ResonanceWindow(self.root, self.settings, lambda: self.save_settings(), self.apply_resonance_theme)
+        ResonanceWindow(self.root, self.settings, lambda: save_settings(self.settings), self.apply_resonance_theme)
 
     def update_ui_from_settings(self):
         self.unit_label.config(text=f"Width ({self.settings['units']}):")
@@ -1879,7 +1891,7 @@ class PadSVGGeneratorApp:
                     files_generated = True
             
             if files_generated:
-                self.save_settings()
+                save_settings(self.settings)
                 messagebox.showinfo("Done", "SVGs generated successfully.")
             else:
                 messagebox.showwarning("No Materials Selected", "Please select at least one material.")
@@ -1931,7 +1943,7 @@ class PadSVGGeneratorApp:
             
             presets[active_library][name] = text_data
             
-            if self.save_presets(presets, file_path):
+            if save_presets(presets, file_path):
                 if preset_type_name == "Pad":
                     self.on_pad_library_selected()
                 else:
@@ -1980,7 +1992,7 @@ class PadSVGGeneratorApp:
         if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
             if selected_lib in presets and selected_preset in presets[selected_lib]:
                 del presets[selected_lib][selected_preset]
-                if self.save_presets(presets, file_path):
+                if save_presets(presets, file_path):
                     library_refresh_func() 
                     if isinstance(entry_widget, tk.Text):
                         entry_widget.delete("1.0", tk.END)
