@@ -50,9 +50,10 @@ DEFAULT_SETTINGS = {
     "compatibility_mode": False,
     
     # NEW SETTINGS FOR v2.1
+    "darts_enabled": True,    # Master toggle for the feature
     "dart_threshold": 18.0,   
-    "dart_overwrap": 1.0,     
-    "dart_wrap_bonus": 1.5,   # Extra wrap added to base calculation for darted pads
+    "dart_overwrap": 0.5,     # Updated default
+    "dart_wrap_bonus": 0.75,  # Updated default
     
     "key_layout": {
         "show_serial": False,
@@ -218,11 +219,12 @@ def get_disc_diameter(pad_size, material, settings):
     if material == 'leather':
         # Check if Star Pattern applies
         threshold = settings.get("dart_threshold", 18.0)
+        darts_enabled = settings.get("darts_enabled", True)
         
-        if pad_size < threshold:
+        if darts_enabled and pad_size < threshold:
             # --- DART BOOST LOGIC ---
             # Add extra material to base wrap for stars
-            bonus = settings.get("dart_wrap_bonus", 1.5)
+            bonus = settings.get("dart_wrap_bonus", 0.75)
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"], extra_base=bonus)
         else:
             # Standard Wrap
@@ -349,12 +351,13 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
     for pad_size, cx, cy, r in placed:
         
         threshold = settings.get("dart_threshold", 18.0)
+        darts_enabled = settings.get("darts_enabled", True)
         
         # Check if we should Draw a Star (Sine Wave)
-        if material == 'leather' and pad_size < threshold:
+        if material == 'leather' and darts_enabled and pad_size < threshold:
             # --- STAR LOGIC ---
             felt_thick = get_felt_thickness_mm(settings)
-            overwrap = settings.get("dart_overwrap", 1.0)
+            overwrap = settings.get("dart_overwrap", 0.5)
             
             # 1. Inner Radius (Valley) - Safe Zone
             felt_r = (pad_size - settings["felt_offset"]) / 2
@@ -519,9 +522,10 @@ class OptionsWindow:
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
         # NEW VARS FOR v2.1
+        self.darts_enabled_var = tk.BooleanVar(value=self.settings.get("darts_enabled", True))
         self.dart_threshold_var = tk.DoubleVar(value=self.settings.get("dart_threshold", 18.0))
-        self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 1.0))
-        self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 1.5))
+        self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 0.5))
+        self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 0.75))
         
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
@@ -570,14 +574,16 @@ class OptionsWindow:
         darts_frame.pack(fill="x", pady=5)
         darts_frame.columnconfigure(1, weight=1)
         
-        tk.Label(darts_frame, text="Use Star Pattern below (mm):", bg="#F0EAD6").grid(row=0, column=0, sticky='w', pady=2)
-        tk.Entry(darts_frame, textvariable=self.dart_threshold_var, width=10).grid(row=0, column=1, sticky='w', pady=2)
+        tk.Checkbutton(darts_frame, text="Enable Star / Dart Pattern", variable=self.darts_enabled_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+        
+        tk.Label(darts_frame, text="Use Star Pattern below (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_threshold_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
 
-        tk.Label(darts_frame, text="Star Safe Overwrap (Valley) (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
-        tk.Entry(darts_frame, textvariable=self.dart_overwrap_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
+        tk.Label(darts_frame, text="Star Safe Overwrap (Valley) (mm):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_overwrap_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
-        tk.Label(darts_frame, text="Star Wrap Bonus (Adds to Tip) (mm):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
-        tk.Entry(darts_frame, textvariable=self.dart_wrap_bonus_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
+        tk.Label(darts_frame, text="Star Wrap Bonus (Adds to Tip) (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_wrap_bonus_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
 
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
@@ -630,6 +636,7 @@ class OptionsWindow:
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
         # NEW SAVE LOGIC
+        self.settings["darts_enabled"] = self.darts_enabled_var.get()
         self.settings["dart_threshold"] = self.dart_threshold_var.get()
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
         self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
@@ -662,9 +669,10 @@ class OptionsWindow:
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
             
             # NEW REVERT LOGIC
+            self.darts_enabled_var.set(DEFAULT_SETTINGS.get("darts_enabled", True))
             self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
-            self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 1.0))
-            self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 1.5))
+            self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 0.5))
+            self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 0.75))
             
             # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
