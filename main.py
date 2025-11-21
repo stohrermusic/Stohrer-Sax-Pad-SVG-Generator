@@ -54,6 +54,7 @@ DEFAULT_SETTINGS = {
     "dart_threshold": 18.0,   
     "dart_overwrap": 0.5,     # Updated default
     "dart_wrap_bonus": 0.75,  # Updated default
+    "dart_frequency_multiplier": 1.0, # Default frequency scaler
     
     "key_layout": {
         "show_serial": False,
@@ -373,7 +374,11 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             
             # 3. Dynamic Points
             circumference = 2 * math.pi * inner_r
-            num_points = int(circumference / 3.5) 
+            # Get multiplier from settings
+            freq_mult = settings.get("dart_frequency_multiplier", 1.0)
+            # Base calculation: one tooth every ~3.5mm, scaled by multiplier
+            num_points = int((circumference / 3.5) * freq_mult)
+            
             if num_points < 12: num_points = 12 
             if num_points % 2 != 0: num_points += 1 
             
@@ -526,6 +531,7 @@ class OptionsWindow:
         self.dart_threshold_var = tk.DoubleVar(value=self.settings.get("dart_threshold", 18.0))
         self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 0.5))
         self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 0.75))
+        self.dart_frequency_multiplier_var = tk.DoubleVar(value=self.settings.get("dart_frequency_multiplier", 1.0))
         
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
@@ -585,6 +591,9 @@ class OptionsWindow:
         tk.Label(darts_frame, text="Star Wrap Bonus (Adds to Tip) (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
         tk.Entry(darts_frame, textvariable=self.dart_wrap_bonus_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
 
+        tk.Label(darts_frame, text="Star Frequency Multiplier (1.0=Default):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_frequency_multiplier_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
+
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
         
@@ -640,6 +649,7 @@ class OptionsWindow:
         self.settings["dart_threshold"] = self.dart_threshold_var.get()
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
         self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
+        self.settings["dart_frequency_multiplier"] = self.dart_frequency_multiplier_var.get()
         
         # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
@@ -673,6 +683,7 @@ class OptionsWindow:
             self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
             self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 0.5))
             self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 0.75))
+            self.dart_frequency_multiplier_var.set(DEFAULT_SETTINGS.get("dart_frequency_multiplier", 1.0))
             
             # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
