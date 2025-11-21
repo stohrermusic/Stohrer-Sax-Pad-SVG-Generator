@@ -22,6 +22,7 @@ jobs:
       run: pip install pyinstaller svgwrite
 
     - name: Build with PyInstaller
+      # We use the basic command because it is now a single file again
       run: pyinstaller --noconsole --onefile --name "StohrerPadGenerator" main.py
 
     - name: Upload EXE
