@@ -50,12 +50,16 @@ DEFAULT_SETTINGS = {
     "compatibility_mode": False,
     
     # NEW SETTINGS FOR v2.1
-    "darts_enabled": True,    # Master toggle
+    "darts_enabled": True,    
     "dart_threshold": 18.0,   
     "dart_overwrap": 0.5,     
-    "dart_wrap_bonus": 0.75,  
-    "dart_frequency_multiplier": 1.0, 
-    "dart_shape_factor": 0.0, # 0.0 = Sine, 1.0 = Square
+    "dart_wrap_bonus": 0.75, 
+    "dart_frequency_multiplier": 1.0,
+    "dart_shape_factor": 0.0,
+    
+    # DART SPECIFIC ENGRAVING DEFAULTS
+    "dart_engraving_on": True,
+    "dart_engraving_loc": {"mode": "from_outside", "value": 2.5},
     
     "key_layout": {
         "show_serial": False,
@@ -213,7 +217,6 @@ def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12, shape_factor=0.
         raw_wave = math.cos(num_points * theta)
         
         # Apply Shaping: sign * |raw|^power
-        # This flattens the tops/bottoms as power gets closer to 0
         shaped_wave = (1 if raw_wave >= 0 else -1) * (abs(raw_wave) ** power)
         
         r = avg_r + amplitude * shaped_wave
@@ -233,7 +236,6 @@ def get_disc_diameter(pad_size, material, settings):
     if material == 'exact_size': return pad_size
     
     if material == 'leather':
-        # Check if Star Pattern applies
         threshold = settings.get("dart_threshold", 18.0)
         darts_enabled = settings.get("darts_enabled", True)
         
@@ -369,8 +371,9 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
         threshold = settings.get("dart_threshold", 18.0)
         darts_enabled = settings.get("darts_enabled", True)
         
-        # Check if we should Draw a Star (Sine Wave)
-        if material == 'leather' and darts_enabled and pad_size < threshold:
+        is_dart_pad = (material == 'leather' and darts_enabled and pad_size < threshold)
+        
+        if is_dart_pad:
             # --- STAR LOGIC ---
             felt_thick = get_felt_thickness_mm(settings)
             overwrap = settings.get("dart_overwrap", 0.5)
@@ -380,10 +383,8 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             inner_r = felt_r + felt_thick + overwrap
             
             # 2. Outer Radius (Tip) - The Boosted Wrap
-            # 'r' is the full Boosted radius from get_disc_diameter
             outer_r = r
             
-            # Safety Check
             if inner_r >= outer_r:
                  inner_r = outer_r - 0.2 
             
@@ -418,9 +419,25 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
-        # --- Draw Engraving Text ---
-        if settings.get("engraving_on", True) and (font_size < r * 0.8):
-            engraving_settings = settings["engraving_location"][material]
+        # --- Determine Engraving Settings (Standard vs Star) ---
+        should_engrave = False
+        
+        if is_dart_pad:
+            # Use Star Specific Settings
+            if settings.get("dart_engraving_on", True):
+                engraving_settings = settings.get("dart_engraving_loc", {"mode": "from_outside", "value": 2.5})
+                should_engrave = True
+        else:
+            # Use Standard Settings
+            if settings.get("engraving_on", True):
+                engraving_settings = settings["engraving_location"][material]
+                should_engrave = True
+
+        # Safety Check: Don't engrave if text is wider than the pad radius
+        if should_engrave and (font_size >= r * 0.8):
+            should_engrave = False
+        
+        if should_engrave:
             mode = engraving_settings['mode']
             value = engraving_settings['value']
             
@@ -501,7 +518,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x700") 
+        self.top.geometry("500x750") 
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -553,6 +570,11 @@ class OptionsWindow:
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
         
+        # --- NEW: Dart Engraving Vars ---
+        self.dart_engraving_on_var = tk.BooleanVar(value=self.settings.get("dart_engraving_on", True))
+        self.dart_engraving_mode_var = tk.StringVar(value=self.settings.get("dart_engraving_loc", {}).get("mode", "from_outside"))
+        self.dart_engraving_val_var = tk.DoubleVar(value=self.settings.get("dart_engraving_loc", {}).get("value", 2.5))
+
         self.create_option_widgets()
     
     def _on_mousewheel(self, event):
@@ -612,22 +634,19 @@ class OptionsWindow:
         # Row 5: Shape Slider
         shape_frame = tk.Frame(darts_frame, bg="#F0EAD6")
         shape_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
-        
         tk.Label(shape_frame, text="Shape:", bg="#F0EAD6").pack(side="left")
         tk.Label(shape_frame, text="Sine", bg="#F0EAD6", font=("Arial", 8)).pack(side="left", padx=(5, 0))
-        
         scale = tk.Scale(shape_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, 
                          variable=self.dart_shape_factor_var, showvalue=0, 
                          bg="#F0EAD6", highlightthickness=0, length=150, resolution=0.01)
         scale.pack(side="left", fill="x", expand=True, padx=5)
-        
         tk.Label(shape_frame, text="Square", bg="#F0EAD6", font=("Arial", 8)).pack(side="left")
 
 
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
         
-        tk.Checkbutton(engraving_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
+        tk.Checkbutton(engraving_frame, text="Show Size Label (Standard Pads)", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
 
         font_size_frame = tk.LabelFrame(engraving_frame, text="Font Sizes (mm)", bg="#F0EAD6", padx=5, pady=5)
         font_size_frame.pack(fill='x', pady=5)
@@ -640,7 +659,7 @@ class OptionsWindow:
             tk.Entry(font_size_frame, textvariable=font_size_var, width=8).grid(row=i, column=1, sticky='w', padx=5, pady=2)
 
 
-        engraving_loc_frame = tk.LabelFrame(main_frame, text="Engraving Placement", bg="#F0EAD6", padx=5, pady=5)
+        engraving_loc_frame = tk.LabelFrame(main_frame, text="Standard Pad Placement", bg="#F0EAD6", padx=5, pady=5)
         engraving_loc_frame.pack(fill="x", pady=5)
         
         for material in materials:
@@ -658,7 +677,23 @@ class OptionsWindow:
             
             tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
-            
+
+        # --- NEW SECTION: STAR PAD ENGRAVING ---
+        star_eng_frame = tk.LabelFrame(engraving_frame, text="Star / Dart Pad Placement", bg="#F0EAD6", padx=5, pady=5)
+        star_eng_frame.pack(fill="x", pady=10)
+
+        tk.Checkbutton(star_eng_frame, text="Show Label on Star Pads", variable=self.dart_engraving_on_var, bg="#F0EAD6").pack(anchor='w')
+        
+        star_loc_frame = tk.Frame(star_eng_frame, bg="#F0EAD6")
+        star_loc_frame.pack(fill='x', pady=2)
+        
+        tk.Radiobutton(star_loc_frame, text="from outside", variable=self.dart_engraving_mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="from inside", variable=self.dart_engraving_mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="centered", variable=self.dart_engraving_mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+        
+        tk.Entry(star_loc_frame, textvariable=self.dart_engraving_val_var, width=6).pack(side="left", padx=5)
+        tk.Label(star_loc_frame, text="mm", bg="#F0EAD6").pack(side="left")
+
         export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
         export_frame.pack(fill="x", pady=5)
         tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
@@ -690,6 +725,13 @@ class OptionsWindow:
         for material, vars in self.engraving_loc_vars.items():
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
+            
+        # NEW STAR ENGRAVING SAVE
+        self.settings["dart_engraving_on"] = self.dart_engraving_on_var.get()
+        self.settings["dart_engraving_loc"] = {
+            "mode": self.dart_engraving_mode_var.get(),
+            "value": self.dart_engraving_val_var.get()
+        }
             
         # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
@@ -726,6 +768,11 @@ class OptionsWindow:
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
                  
+            # Revert Star Engraving
+            self.dart_engraving_on_var.set(True)
+            self.dart_engraving_mode_var.set("from_outside")
+            self.dart_engraving_val_var.set(2.5)
+
             # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
 
