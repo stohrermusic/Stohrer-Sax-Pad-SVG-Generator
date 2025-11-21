@@ -134,9 +134,6 @@ def load_settings():
                         else:
                             settings[key] = loaded_settings[key]
                 
-                # --- DELETED LEGACY CODE THAT WAS REMOVING DART KEYS ---
-                # This ensures your new settings persist!
-                    
                 return settings
         except (json.JSONDecodeError, TypeError):
             return DEFAULT_SETTINGS.copy()
@@ -144,8 +141,6 @@ def load_settings():
 
 def save_settings(settings):
     try:
-        # --- DELETED LEGACY CODE THAT WAS REMOVING DART KEYS ---
-        
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
     except Exception as e:
@@ -187,19 +182,35 @@ def save_presets(presets, file_path):
 # SECTION 2: LOGIC & MATH (logic)
 # ==========================================
 
-def calculate_star_path(cx, cy, outer_r, inner_r, num_points=10):
-    """Generates an SVG path string for a star shape."""
+def calculate_star_path(cx, cy, outer_r, inner_r, num_points):
+    """
+    Generates an SVG path string for a smooth Sine Wave (Flower) shape.
+    Replaces sharp polygons with a sine-based modulation.
+    """
     path_data = []
-    angle_step = math.pi / num_points 
-    current_angle = -math.pi / 2 
+    
+    # Sine Wave Parameters
+    # Radius(theta) = avg_r + amplitude * cos(num_points * theta)
+    avg_r = (outer_r + inner_r) / 2.0
+    amplitude = (outer_r - inner_r) / 2.0
+    
+    # Resolution: Higher steps for smoother laser curves
+    steps = int(num_points * 8) # Scale resolution with complexity
+    if steps < 64: steps = 64
+    
+    angle_step = (2 * math.pi) / steps
 
-    for i in range(num_points * 2):
-        r = outer_r if i % 2 == 0 else inner_r
-        x = cx + r * math.cos(current_angle)
-        y = cy + r * math.sin(current_angle)
+    for i in range(steps + 1):
+        theta = i * angle_step
+        
+        # Sine Wave Formula: Oscillates between inner_r and outer_r
+        r = avg_r + amplitude * math.cos(num_points * theta)
+        
+        x = cx + r * math.cos(theta)
+        y = cy + r * math.sin(theta)
+        
         command = "M" if i == 0 else "L"
         path_data.append(f"{command} {x:.3f} {y:.3f}")
-        current_angle += angle_step
         
     path_data.append("Z") 
     return " ".join(path_data)
@@ -208,6 +219,7 @@ def get_disc_diameter(pad_size, material, settings):
     if material == 'felt': return pad_size - settings["felt_offset"]
     if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
     if material == 'leather':
+        # Calculate standard wrap for nesting collision detection
         wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
         felt_thickness_mm = get_felt_thickness_mm(settings)
         diameter = pad_size + 2 * (felt_thickness_mm + wrap)
@@ -304,6 +316,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             x = spacing_mm
             while x + dia + spacing_mm <= width_mm:
                 cx, cy = x + r, y + r
+                # Check collision using standard circle r
                 is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
                 if not is_collision:
                     placed.append((pad_size, cx, cy, r))
@@ -325,24 +338,38 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
     for pad_size, cx, cy, r in placed:
         
-        # --- Draw Outline (Star or Circle) ---
         threshold = settings.get("dart_threshold", 18.0)
         
+        # Check if we should Draw a Star (Sine Wave)
         if material == 'leather' and pad_size < threshold:
-            # Star Logic
+            # --- STAR LOGIC ---
             felt_thick = get_felt_thickness_mm(settings)
             overwrap = settings.get("dart_overwrap", 1.0)
+            
+            # 1. Inner Radius (The Valley)
+            # Standard calculation: felt + thickness + safe overwrap
             felt_r = (pad_size - settings["felt_offset"]) / 2
             inner_r = felt_r + felt_thick + overwrap
             
-            if inner_r >= r:
-                inner_r = r - 0.5 
+            # 2. Outer Radius (The Tip)
+            # We ensure the teeth are deep enough by forcing the outer radius to extend
+            # significantly past the inner radius.
+            # 2.5mm depth + inner_r usually creates nice teeth.
+            outer_r = max(r, inner_r + 2.5) 
             
-            path_d = calculate_star_path(cx, cy, r, inner_r, num_points=10)
+            # 3. Dynamic Points (Teeth Frequency)
+            # We want a constant "tooth density" regardless of size.
+            # Circumference ~ 2 * pi * r. Let's say we want a tooth every ~3-4mm of circumference.
+            circumference = 2 * math.pi * inner_r
+            num_points = int(circumference / 3.5) 
+            if num_points < 12: num_points = 12 # Minimum 12 teeth
+            if num_points % 2 != 0: num_points += 1 # Ensure even number just in case
+            
+            path_d = calculate_star_path(cx, cy, outer_r, inner_r, num_points=num_points)
             
             dwg.add(dwg.path(d=path_d, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
         else:
-            # Circle Logic
+            # --- STANDARD CIRCLE LOGIC ---
             if compatibility_mode:
                 dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
             else:
@@ -360,7 +387,6 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
-        # --- Draw Engraving Text ---
         if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
