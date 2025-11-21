@@ -7,7 +7,7 @@ import math
 import svgwrite
 
 # ==========================================
-# SECTION 1: CONFIGURATION & DATA (sax_data)
+# SECTION 1: CONFIGURATION & DATA
 # ==========================================
 
 # --- Lightburn Color Palette ---
@@ -52,6 +52,7 @@ DEFAULT_SETTINGS = {
     # NEW SETTINGS FOR v2.1
     "dart_threshold": 18.0,   
     "dart_overwrap": 1.0,     
+    "dart_wrap_bonus": 1.5,   # Extra wrap added to base calculation for darted pads
     
     "key_layout": {
         "show_serial": False,
@@ -179,31 +180,25 @@ def save_presets(presets, file_path):
 
 
 # ==========================================
-# SECTION 2: LOGIC & MATH (logic)
+# SECTION 2: LOGIC & MATH
 # ==========================================
 
-def calculate_star_path(cx, cy, outer_r, inner_r, num_points):
+def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12):
     """
     Generates an SVG path string for a smooth Sine Wave (Flower) shape.
-    Replaces sharp polygons with a sine-based modulation.
     """
     path_data = []
     
-    # Sine Wave Parameters
-    # Radius(theta) = avg_r + amplitude * cos(num_points * theta)
     avg_r = (outer_r + inner_r) / 2.0
     amplitude = (outer_r - inner_r) / 2.0
     
-    # Resolution: Higher steps for smoother laser curves
-    steps = int(num_points * 8) # Scale resolution with complexity
+    steps = int(num_points * 8) 
     if steps < 64: steps = 64
     
     angle_step = (2 * math.pi) / steps
 
     for i in range(steps + 1):
         theta = i * angle_step
-        
-        # Sine Wave Formula: Oscillates between inner_r and outer_r
         r = avg_r + amplitude * math.cos(num_points * theta)
         
         x = cx + r * math.cos(theta)
@@ -218,13 +213,25 @@ def calculate_star_path(cx, cy, outer_r, inner_r, num_points):
 def get_disc_diameter(pad_size, material, settings):
     if material == 'felt': return pad_size - settings["felt_offset"]
     if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+    if material == 'exact_size': return pad_size
+    
     if material == 'leather':
-        # Calculate standard wrap for nesting collision detection
-        wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+        # Check if Star Pattern applies
+        threshold = settings.get("dart_threshold", 18.0)
+        
+        if pad_size < threshold:
+            # --- DART BOOST LOGIC ---
+            # Add extra material to base wrap for stars
+            bonus = settings.get("dart_wrap_bonus", 1.5)
+            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"], extra_base=bonus)
+        else:
+            # Standard Wrap
+            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+            
         felt_thickness_mm = get_felt_thickness_mm(settings)
         diameter = pad_size + 2 * (felt_thickness_mm + wrap)
         return round(diameter * 2) / 2
-    if material == 'exact_size': return pad_size
+        
     return 0
 
 def check_for_oversized_engravings(pads, material_vars, settings):
@@ -246,7 +253,7 @@ def check_for_oversized_engravings(pads, material_vars, settings):
             oversized[material] = oversized_sizes
     return oversized
 
-def leather_back_wrap(pad_size, multiplier):
+def leather_back_wrap(pad_size, multiplier, extra_base=0.0):
     base_wrap = 0
     if pad_size >= 45:
         base_wrap = 3.2
@@ -256,7 +263,10 @@ def leather_back_wrap(pad_size, multiplier):
         base_wrap = 1.0 + (pad_size - 6) * (0.2 / 6.0)
     else:
         base_wrap = 1.0
-    return base_wrap * multiplier
+        
+    # Apply the Dart Bonus (if any) before multiplier
+    total_base = base_wrap + extra_base
+    return total_base * multiplier
 
 def should_have_center_hole(pad_size, hole_dia, settings):
     min_size = settings.get("min_hole_size", 16.5)
@@ -346,24 +356,24 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             felt_thick = get_felt_thickness_mm(settings)
             overwrap = settings.get("dart_overwrap", 1.0)
             
-            # 1. Inner Radius (The Valley)
-            # Standard calculation: felt + thickness + safe overwrap
+            # 1. Inner Radius (Valley) - Safe Zone
             felt_r = (pad_size - settings["felt_offset"]) / 2
             inner_r = felt_r + felt_thick + overwrap
             
-            # 2. Outer Radius (The Tip)
-            # We ensure the teeth are deep enough by forcing the outer radius to extend
-            # significantly past the inner radius.
-            # 2.5mm depth + inner_r usually creates nice teeth.
-            outer_r = max(r, inner_r + 2.5) 
+            # 2. Outer Radius (Tip) - The Boosted Wrap
+            # 'r' is the full Boosted radius from get_disc_diameter
+            outer_r = r
             
-            # 3. Dynamic Points (Teeth Frequency)
-            # We want a constant "tooth density" regardless of size.
-            # Circumference ~ 2 * pi * r. Let's say we want a tooth every ~3-4mm of circumference.
+            # Safety Check
+            if inner_r >= outer_r:
+                 inner_r = outer_r - 0.2 
+            
+            # 3. Dynamic Points
+            # Using 3.5mm spacing for that "gear" look
             circumference = 2 * math.pi * inner_r
             num_points = int(circumference / 3.5) 
-            if num_points < 12: num_points = 12 # Minimum 12 teeth
-            if num_points % 2 != 0: num_points += 1 # Ensure even number just in case
+            if num_points < 12: num_points = 12 
+            if num_points % 2 != 0: num_points += 1 
             
             path_d = calculate_star_path(cx, cy, outer_r, inner_r, num_points=num_points)
             
@@ -387,6 +397,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
+        # --- Draw Engraving Text ---
         if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
@@ -423,7 +434,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
 
 # ==========================================
-# SECTION 3: GUI DIALOGS (gui_dialogs)
+# SECTION 3: GUI DIALOGS
 # ==========================================
 
 class ConfirmationDialog(tk.Toplevel):
@@ -511,6 +522,7 @@ class OptionsWindow:
         # NEW VARS FOR v2.1
         self.dart_threshold_var = tk.DoubleVar(value=self.settings.get("dart_threshold", 18.0))
         self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 1.0))
+        self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 1.5))
         
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
@@ -547,18 +559,26 @@ class OptionsWindow:
         tk.Label(rules_frame, text="Min. Pad Size for Hole (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
         tk.Entry(rules_frame, textvariable=self.min_hole_size_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
         
-        tk.Label(rules_frame, text="Star/Dart Threshold (mm):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
-        tk.Entry(rules_frame, textvariable=self.dart_threshold_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
-
-        tk.Label(rules_frame, text="Star Minimum Overwrap (mm):", bg="#F0EAD6").grid(row=5, column=0, sticky='w', pady=2)
-        tk.Entry(rules_frame, textvariable=self.dart_overwrap_var, width=10).grid(row=5, column=1, sticky='w', pady=2)
-        
         felt_thickness_frame = tk.Frame(rules_frame, bg="#F0EAD6")
-        felt_thickness_frame.grid(row=6, column=0, columnspan=2, sticky='w', pady=2)
+        felt_thickness_frame.grid(row=4, column=0, columnspan=2, sticky='w', pady=2)
         tk.Label(felt_thickness_frame, text="Felt Thickness:", bg="#F0EAD6").pack(side="left")
         tk.Entry(felt_thickness_frame, textvariable=self.felt_thickness_var, width=10).pack(side="left", padx=5)
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
+
+        # --- NEW DART SETTINGS FRAME ---
+        darts_frame = tk.LabelFrame(main_frame, text="Star / Dart Settings", bg="#F0EAD6", padx=5, pady=5)
+        darts_frame.pack(fill="x", pady=5)
+        darts_frame.columnconfigure(1, weight=1)
+        
+        tk.Label(darts_frame, text="Use Star Pattern below (mm):", bg="#F0EAD6").grid(row=0, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_threshold_var, width=10).grid(row=0, column=1, sticky='w', pady=2)
+
+        tk.Label(darts_frame, text="Star Safe Overwrap (Valley) (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_overwrap_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
+
+        tk.Label(darts_frame, text="Star Wrap Bonus (Adds to Tip) (mm):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_wrap_bonus_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
 
         engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
@@ -601,6 +621,7 @@ class OptionsWindow:
 
 
     def save_options(self):
+        # Sizing
         self.settings["units"] = self.unit_var.get()
         self.settings["felt_offset"] = self.felt_offset_var.get()
         self.settings["card_to_felt_offset"] = self.card_offset_var.get()
@@ -609,9 +630,12 @@ class OptionsWindow:
         self.settings["felt_thickness"] = self.felt_thickness_var.get()
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
+        # NEW SAVE LOGIC
         self.settings["dart_threshold"] = self.dart_threshold_var.get()
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
+        self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
         
+        # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
         for material, var in self.engraving_font_size_vars.items():
             self.settings["engraving_font_size"][material] = var.get()
@@ -620,6 +644,7 @@ class OptionsWindow:
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
             
+        # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
         
         self.save_callback()
@@ -628,6 +653,7 @@ class OptionsWindow:
 
     def revert_to_defaults(self):
         if messagebox.askyesno("Revert to Defaults", "Are you sure you want to revert all settings to their original defaults?"):
+            # Sizing
             self.unit_var.set(DEFAULT_SETTINGS["units"])
             self.felt_offset_var.set(DEFAULT_SETTINGS["felt_offset"])
             self.card_offset_var.set(DEFAULT_SETTINGS["card_to_felt_offset"])
@@ -636,9 +662,12 @@ class OptionsWindow:
             self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
             
+            # NEW REVERT LOGIC
             self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
             self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 1.0))
+            self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 1.5))
             
+            # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
             for material, var in self.engraving_font_size_vars.items():
                  var.set(DEFAULT_SETTINGS["engraving_font_size"][material])
@@ -647,6 +676,7 @@ class OptionsWindow:
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
                  
+            # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
 
 
@@ -716,14 +746,16 @@ class KeyLayoutWindow:
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
-        self.top.geometry("350x450") 
+        self.top.geometry("350x450") # Give it a reasonable default size
 
+        # --- Main Layout Frames ---
         bottom_button_frame = tk.Frame(self.top, bg="#F0EAD6")
         bottom_button_frame.pack(side="bottom", fill="x", pady=10, padx=10)
         
         tk.Button(bottom_button_frame, text="Save", command=self.save_options).pack(side="left", padx=5)
         tk.Button(bottom_button_frame, text="Cancel", command=self.top.destroy).pack(side="left", padx=5)
 
+        # Use a scrollable frame like in OptionsWindow, as the key list is long
         main_canvas_frame = tk.Frame(self.top)
         main_canvas_frame.pack(side="top", fill="both", expand=True, padx=10, pady=10)
 
@@ -741,16 +773,21 @@ class KeyLayoutWindow:
         self.top.bind('<MouseWheel>', self._on_mousewheel)
 
         self.key_layout_vars = {}
+        # Get a copy to modify, matching the settings load logic
         self.key_layout_settings = DEFAULT_SETTINGS["key_layout"].copy()
         self.key_layout_settings.update(self.settings.get("key_layout", {}))
 
+
+        # --- Create Widgets ---
         info_frame = tk.LabelFrame(self.scrollable_frame, text="Horn Info Layout", bg="#F0EAD6", padx=5, pady=5)
         info_frame.pack(fill="x", pady=5)
 
+        # Serial Number Checkbox
         var = tk.BooleanVar(value=self.key_layout_settings.get("show_serial", False))
         self.key_layout_vars["show_serial"] = var
         tk.Checkbutton(info_frame, text="Show 'Serial' field", variable=var, bg="#F0EAD6").pack(anchor='w')
 
+        # Large Notes Checkbox
         var = tk.BooleanVar(value=self.key_layout_settings.get("large_notes", False))
         self.key_layout_vars["large_notes"] = var
         tk.Checkbutton(info_frame, text="Use large 'Notes' field", variable=var, bg="#F0EAD6").pack(anchor='w')
@@ -758,22 +795,27 @@ class KeyLayoutWindow:
         keys_frame = tk.LabelFrame(self.scrollable_frame, text="Visible Key Heights", bg="#F0EAD6", padx=5, pady=5)
         keys_frame.pack(fill="x", pady=5, expand=True)
 
+        # Use ALL_KEY_HEIGHT_FIELDS to build the checkboxes
         for key_name in ALL_KEY_HEIGHT_FIELDS:
             setting_key = f"show_{key_name.replace(' ', '_')}"
+            # Default to True if the setting is somehow missing from the config
             var = tk.BooleanVar(value=self.key_layout_settings.get(setting_key, True)) 
             self.key_layout_vars[setting_key] = var
             tk.Checkbutton(keys_frame, text=f"Show '{key_name}' field", variable=var, bg="#F0EAD6").pack(anchor='w')
 
+        
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def save_options(self):
+        # Update the settings dict from the vars
         for key, var in self.key_layout_vars.items():
             self.key_layout_settings[key] = var.get()
         
         self.settings["key_layout"] = self.key_layout_settings
+        
         self.save_callback()
-        self.update_callback() 
+        self.update_callback() # This will rebuild the key tab
         self.top.destroy()
         
 class ResonanceWindow(tk.Toplevel):
@@ -834,7 +876,8 @@ class ResonanceProgressDialog(tk.Toplevel):
         
         if clicks >= 100:
             messagebox.showinfo("Power Overwhelming", "You have become too powerful.")
-            self.destroy() 
+            self.destroy() # Close this window
+            # Start the "uninstall" process
             UninstallResonanceDialog(self.parent_app, self.settings, self.save_callback, self.theme_callback)
         else:
             self.save_callback()
@@ -853,7 +896,7 @@ class UninstallResonanceDialog(tk.Toplevel):
         self.geometry("300x100")
         self.configure(bg="#F0EAD6")
         self.transient(parent)
-        self.grab_set()
+        self.grab_set() # This makes the main window unusable
 
         tk.Label(self, text="Uninstalling resonance...", bg="#F0EAD6").pack(pady=10)
         self.progress = ttk.Progressbar(self, orient="horizontal", length=250, mode="determinate")
@@ -863,6 +906,7 @@ class UninstallResonanceDialog(tk.Toplevel):
     def update_progress(self, val):
         self.progress['value'] = val
         if val < 100:
+            # 2 seconds total duration
             self.after(20, self.update_progress, val + 1)
         else:
             self.after(200, self.finish_uninstall)
@@ -876,7 +920,7 @@ class UninstallResonanceDialog(tk.Toplevel):
 class ExportPresetsWindow(tk.Toplevel):
     def __init__(self, parent, presets, title, default_filename, ask_provenance=False):
         super().__init__(parent)
-        self.presets = presets
+        self.presets = presets # For Pads, this is flat. For Keys, this is nested.
         self.title(title)
         self.default_filename = default_filename
         self.ask_provenance = ask_provenance
@@ -908,16 +952,17 @@ class ExportPresetsWindow(tk.Toplevel):
         if not presets:
              tk.Label(self.scrollable_frame, text="No local sets found.", bg="#F0EAD6").pack(pady=10)
         else:
+            # Check if this is a nested dictionary (Key Libraries)
             if any(isinstance(v, dict) for v in presets.values()):
                 for lib_name in sorted(self.presets.keys()):
                     tk.Label(self.scrollable_frame, text=f"[{lib_name}]", bg="#F0EAD6", font=("Helvetica", 10, "bold")).pack(anchor='w', pady=(5,0))
                     for preset_name in sorted(self.presets[lib_name].keys()):
                         var = tk.BooleanVar()
-                        full_name = f"{lib_name}::{preset_name}"
+                        full_name = f"{lib_name}::{preset_name}" # Internal delimiter
                         cb = tk.Checkbutton(self.scrollable_frame, text=f"  {preset_name}", variable=var, bg="#F0EAD6")
                         cb.pack(anchor='w')
                         self.vars[full_name] = var
-            else:
+            else: # Flat dictionary (Pad Presets) - This is for legacy support, should be nested now
                 for name in sorted(self.presets.keys()):
                     var = tk.BooleanVar()
                     cb = tk.Checkbutton(self.scrollable_frame, text=name, variable=var, bg="#F0EAD6")
@@ -961,6 +1006,7 @@ class ExportPresetsWindow(tk.Toplevel):
                     to_export[name] = self.presets[name]
                     selected_count += 1
 
+        
         if not to_export:
             messagebox.showwarning("No Selection", "Please select at least one set to export.")
             return
@@ -970,7 +1016,7 @@ class ExportPresetsWindow(tk.Toplevel):
         if self.ask_provenance:
             user_name = simpledialog.askstring("Provenance", "Enter your name (for filename):")
             if not user_name:
-                user_name = "Export" 
+                user_name = "Export" # Default if cancelled
             user_name = user_name.replace(" ", "_")
             
             if selected_count == 1 and last_selected_data:
@@ -1006,11 +1052,12 @@ class ImportPresetsWindow(tk.Toplevel):
     def __init__(self, parent, local_presets_lib, imported_presets, file_path, menu_widget, app_instance, preset_type_name="Preset", save_data=None):
         super().__init__(parent)
         self.parent_app = app_instance
-        self.local_presets_lib = local_presets_lib
-        self.imported_presets = imported_presets
+        self.local_presets_lib = local_presets_lib # This is the specific library dict for key heights, or all presets for pads
+        self.imported_presets = imported_presets # This is the dict of presets from the file
         self.file_path = file_path
         self.menu_widget = menu_widget
         self.preset_type_name = preset_type_name
+        # This is the *entire* preset object (e.g., self.key_presets, which is a dict of dicts) for saving
         self.save_data = save_data if save_data is not None else local_presets_lib
         
         self.title(f"Import {preset_type_name}s")
@@ -1075,11 +1122,12 @@ class ImportPresetsWindow(tk.Toplevel):
                 preset_data = self.imported_presets[name]
                 new_name = name
                 
+                # Handle bracketed library names from key set exports
                 if new_name.startswith("[") and "] " in new_name:
                     try:
                         new_name = new_name.split("] ", 1)[1]
                     except Exception:
-                        pass
+                        pass # Keep original name if split fails
                         
                 while new_name in self.local_presets_lib:
                     new_name += "*"
@@ -1091,7 +1139,9 @@ class ImportPresetsWindow(tk.Toplevel):
                 added_count += 1
         
         if added_count > 0:
-            if save_presets(self.save_data, self.file_path):
+            # Use the imported save_presets function from config
+            if self.parent_app.save_presets(self.save_data, self.file_path):
+                # Special refresh for key height library
                 if self.preset_type_name == "Key Height Set":
                     self.parent_app.update_key_library_dropdown()
                 else:
@@ -1175,7 +1225,6 @@ class ImportTargetWindow(tk.Toplevel):
 
     def get_target_library(self):
         return self.target_library
-
 
 # ==========================================
 # SECTION 4: MAIN APP CLASS (main)
@@ -1578,7 +1627,7 @@ class PadSVGGeneratorApp:
                 return
         
         self.key_presets[active_library][name] = data
-        if save_presets(self.key_presets, KEY_PRESET_FILE):
+        if self.save_presets(self.key_presets, KEY_PRESET_FILE):
             self.on_key_library_selected() 
             messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully to '{active_library}'.")
 
@@ -1637,7 +1686,7 @@ class PadSVGGeneratorApp:
 
         if messagebox.askyesno("Delete Key Height Set", f"Are you sure you want to delete the set '{selected_preset}' from the '{selected_lib}' library?"):
             del self.key_presets[selected_lib][selected_preset]
-            if save_presets(self.key_presets, KEY_PRESET_FILE):
+            if self.save_presets(self.key_presets, KEY_PRESET_FILE):
                 self.on_key_library_selected() 
                 # Clear the form
                 for var in self.key_field_vars.values():
@@ -1860,96 +1909,6 @@ class PadSVGGeneratorApp:
             except ValueError:
                 continue
         return pad_list
-
-    # --- Preset Wrappers ---
-    def on_save_pad_preset(self):
-        self.on_save_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_entry, self.pad_preset_menu, "Pad", self.pad_library_var)
-        
-    def on_delete_pad_preset(self):
-        self.on_delete_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_preset_var, self.pad_preset_menu, self.pad_entry, "Pad", self.pad_library_var, self.on_pad_library_selected)
-    
-    def on_load_pad_preset(self, selected_name):
-        self.on_load_preset(selected_name, self.pad_presets, self.pad_entry, self.pad_library_var, "Load Pad Preset")
-
-    # Using the shared preset logic from the class, which uses self.save_presets from config (imported above)
-    def on_save_preset(self, presets, file_path, entry_widget, menu_widget, preset_type_name, library_var):
-        active_library = library_var.get()
-        if not active_library or active_library == "All Libraries":
-            messagebox.showwarning("Save Error", "Please select a specific library to save to.")
-            return
-
-        name = simpledialog.askstring(f"Save {preset_type_name} Preset", "Enter a name for this preset:")
-        if name:
-            text_data = entry_widget.get("1.0", tk.END)
-            if not text_data.strip():
-                messagebox.showwarning(f"Save {preset_type_name} Preset", "Cannot save an empty list.")
-                return
-            
-            if active_library not in presets:
-                presets[active_library] = {}
-
-            if name in presets[active_library]:
-                if not messagebox.askyesno("Overwrite", f"A set named '{name}' already exists in this library. Overwrite it?"):
-                    return
-            
-            presets[active_library][name] = text_data
-            
-            if save_presets(presets, file_path):
-                if preset_type_name == "Pad":
-                    self.on_pad_library_selected()
-                else:
-                    self.on_key_library_selected()
-                messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
-
-    def on_load_preset(self, selected_name, presets, entry_widget, library_var, load_label):
-        if not selected_name or selected_name == load_label:
-            return
-            
-        lib_name = library_var.get()
-        data = None
-        
-        if lib_name == "All Libraries":
-            try:
-                lib_name, preset_name = selected_name.split("] ", 1)
-                lib_name = lib_name[1:] 
-                if lib_name in presets and preset_name in presets[lib_name]:
-                    data = presets[lib_name][preset_name]
-            except ValueError:
-                return 
-        else:
-            if lib_name in presets and selected_name in presets[lib_name]:
-                data = presets[lib_name][selected_name]
-
-        if data:
-            entry_widget.delete("1.0", tk.END)
-            entry_widget.insert(tk.END, data)
-
-    def on_delete_preset(self, presets, file_path, preset_var, menu_widget, entry_widget, preset_type_name, library_var, library_refresh_func):
-        selected_lib = library_var.get()
-        selected_preset = preset_var.get()
-
-        if not selected_preset or selected_preset.startswith("Load"):
-            messagebox.showwarning("Delete Error", "Please load a set to delete.")
-            return
-
-        if selected_lib == "All Libraries":
-            try:
-                selected_lib, selected_preset = selected_preset.split("] ", 1)
-                selected_lib = selected_lib[1:]
-            except ValueError:
-                messagebox.showerror("Delete Error", "Cannot delete from 'All Libraries' view. Please select the specific library first.")
-                return
-        
-        if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
-            if selected_lib in presets and selected_preset in presets[selected_lib]:
-                del presets[selected_lib][selected_preset]
-                if save_presets(presets, file_path):
-                    library_refresh_func() 
-                    if isinstance(entry_widget, tk.Text):
-                        entry_widget.delete("1.0", tk.END)
-                    messagebox.showinfo("Preset Deleted", f"Preset '{selected_preset}' deleted.")
-            else:
-                messagebox.showerror("Delete Error", "Could not find the preset to delete.")
 
 if __name__ == '__main__':
     root = tk.Tk()
