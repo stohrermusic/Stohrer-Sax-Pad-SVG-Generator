@@ -134,10 +134,8 @@ def load_settings():
                         else:
                             settings[key] = loaded_settings[key]
                 
-                dart_keys = [k for k in settings if k.startswith("dart_")]
-                for k in dart_keys:
-                    if k in settings:
-                        del settings[k]
+                # --- DELETED LEGACY CODE THAT WAS REMOVING DART KEYS ---
+                # This ensures your new settings persist!
                     
                 return settings
         except (json.JSONDecodeError, TypeError):
@@ -146,10 +144,7 @@ def load_settings():
 
 def save_settings(settings):
     try:
-        dart_keys = [k for k in settings if k.startswith("dart_")]
-        for k in dart_keys:
-                if k in settings:
-                del settings[k]
+        # --- DELETED LEGACY CODE THAT WAS REMOVING DART KEYS ---
         
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
@@ -365,6 +360,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
 
         font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
         
+        # --- Draw Engraving Text ---
         if settings.get("engraving_on", True) and (font_size < r * 0.8):
             engraving_settings = settings["engraving_location"][material]
             mode = engraving_settings['mode']
