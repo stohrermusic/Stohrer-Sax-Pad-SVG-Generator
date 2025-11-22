@@ -5,6 +5,14 @@ import json
 import random
 import math
 import svgwrite
+import re # Added for serial number parsing
+
+# --- Import Serial Data ---
+try:
+    import serials
+    SERIAL_DATA = serials.SERIAL_DATA
+except ImportError:
+    SERIAL_DATA = {} # Fallback if file is missing
 
 # ==========================================
 # SECTION 1: CONFIGURATION & DATA
@@ -469,6 +477,42 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
         
     dwg.save()
 
+# --- New Serial Logic ---
+def lookup_serial_year(maker, serial_str):
+    if not maker or not serial_str:
+        return ""
+    
+    if maker not in SERIAL_DATA:
+        return "Manufacturer data not found."
+
+    # Extract numbers only for comparison
+    clean_serial = "".join(filter(str.isdigit, serial_str))
+    if not clean_serial:
+        return "Invalid Serial Number"
+    
+    try:
+        serial_num = int(clean_serial)
+    except ValueError:
+        return "Invalid Serial Number"
+
+    data = SERIAL_DATA[maker]
+    # Data is list of tuples: (Start_Serial, Year)
+    # We want to find the largest Start_Serial <= serial_num
+    
+    found_year = None
+    
+    # Iterate to find the range (Since lists are small, linear scan is fine)
+    for start_serial, year in data:
+        if serial_num >= start_serial:
+            found_year = year
+        else:
+            break # We passed the range
+            
+    if found_year:
+        return str(found_year)
+    else:
+        return "Too old / Unknown"
+
 
 # ==========================================
 # SECTION 3: GUI DIALOGS
@@ -634,6 +678,7 @@ class OptionsWindow:
         # Row 5: Shape Slider
         shape_frame = tk.Frame(darts_frame, bg="#F0EAD6")
         shape_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
+        
         tk.Label(shape_frame, text="Shape:", bg="#F0EAD6").pack(side="left")
         tk.Label(shape_frame, text="Sine", bg="#F0EAD6", font=("Arial", 8)).pack(side="left", padx=(5, 0))
         scale = tk.Scale(shape_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, 
@@ -1433,6 +1478,7 @@ class PadSVGGeneratorApp:
             self.root.config(menu=self.pad_menu)
         elif current_tab == 1:
             self.root.config(menu=self.key_menu)
+        # Tab 2 is Serial Lookup, no special menu yet
 
     def create_widgets(self):
         self.notebook = ttk.Notebook(self.root)
@@ -1447,6 +1493,11 @@ class PadSVGGeneratorApp:
         self.notebook.add(self.key_tab, text='Key Height Library')
         self.create_key_library_tab(self.key_tab)
         
+        # --- Create Tab 3: Serial Lookup ---
+        self.serial_tab = ttk.Frame(self.notebook, style='App.TFrame')
+        self.notebook.add(self.serial_tab, text='Serial Lookup')
+        self.create_serial_lookup_tab(self.serial_tab)
+        
         self.notebook.pack(expand=True, fill="both", padx=5, pady=5)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         
@@ -1457,6 +1508,55 @@ class PadSVGGeneratorApp:
         style.configure('TNotebook', background=self.root.cget('bg'))
         
         self.apply_resonance_theme() 
+
+    def create_serial_lookup_tab(self, parent):
+        # Main layout
+        frame = tk.Frame(parent, bg=self.root.cget('bg'), padx=20, pady=20)
+        frame.pack(expand=True, fill='both')
+        
+        # Title
+        tk.Label(frame, text="Saxophone Serial Number Lookup", font=("Helvetica", 16, "bold"), bg=self.root.cget('bg')).pack(pady=(0, 20))
+        
+        # Controls Frame
+        controls_frame = tk.Frame(frame, bg=self.root.cget('bg'))
+        controls_frame.pack(fill='x', pady=10)
+        
+        # Maker Dropdown
+        tk.Label(controls_frame, text="Manufacturer:", font=("Helvetica", 12), bg=self.root.cget('bg')).grid(row=0, column=0, sticky='e', padx=10, pady=10)
+        
+        self.serial_maker_var = tk.StringVar()
+        makers = sorted(list(SERIAL_DATA.keys())) if SERIAL_DATA else ["No Data Found"]
+        self.serial_maker_dropdown = ttk.Combobox(controls_frame, textvariable=self.serial_maker_var, values=makers, state="readonly", width=25, font=("Helvetica", 12))
+        if makers:
+            self.serial_maker_dropdown.current(0)
+        self.serial_maker_dropdown.grid(row=0, column=1, sticky='w', padx=10, pady=10)
+        
+        # Serial Entry
+        tk.Label(controls_frame, text="Serial Number:", font=("Helvetica", 12), bg=self.root.cget('bg')).grid(row=1, column=0, sticky='e', padx=10, pady=10)
+        
+        self.serial_entry_var = tk.StringVar()
+        self.serial_entry_var.trace("w", self.on_serial_change) # Auto-update on type
+        entry = tk.Entry(controls_frame, textvariable=self.serial_entry_var, width=25, font=("Helvetica", 12))
+        entry.grid(row=1, column=1, sticky='w', padx=10, pady=10)
+        
+        # Result Display
+        self.serial_result_label = tk.Label(frame, text="Enter a serial number...", font=("Helvetica", 24, "bold"), bg=self.root.cget('bg'), fg="#0000A0")
+        self.serial_result_label.pack(pady=40)
+        
+        # Disclaimer
+        disclaimer = "Note: Dates are approximate based on available charts. Ranges represent the start of that production year."
+        tk.Label(frame, text=disclaimer, font=("Helvetica", 9, "italic"), bg=self.root.cget('bg'), wraplength=400).pack(side='bottom', pady=20)
+
+    def on_serial_change(self, *args):
+        maker = self.serial_maker_var.get()
+        serial = self.serial_entry_var.get()
+        
+        if not serial:
+            self.serial_result_label.config(text="...")
+            return
+            
+        year = lookup_serial_year(maker, serial)
+        self.serial_result_label.config(text=year)
 
     def create_pad_generator_tab(self, parent):
         tk.Label(parent, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
@@ -1720,7 +1820,7 @@ class PadSVGGeneratorApp:
                 return
         
         self.key_presets[active_library][name] = data
-        if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+        if save_presets(self.key_presets, KEY_PRESET_FILE):
             self.on_key_library_selected() 
             messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully to '{active_library}'.")
 
@@ -1779,7 +1879,7 @@ class PadSVGGeneratorApp:
 
         if messagebox.askyesno("Delete Key Height Set", f"Are you sure you want to delete the set '{selected_preset}' from the '{selected_lib}' library?"):
             del self.key_presets[selected_lib][selected_preset]
-            if self.save_presets(self.key_presets, KEY_PRESET_FILE):
+            if save_presets(self.key_presets, KEY_PRESET_FILE):
                 self.on_key_library_selected() 
                 # Clear the form
                 for var in self.key_field_vars.values():
@@ -2036,7 +2136,7 @@ class PadSVGGeneratorApp:
             
             presets[active_library][name] = text_data
             
-            if self.save_presets(presets, file_path):
+            if save_presets(presets, file_path):
                 if preset_type_name == "Pad":
                     self.on_pad_library_selected()
                 else:
@@ -2085,7 +2185,7 @@ class PadSVGGeneratorApp:
         if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
             if selected_lib in presets and selected_preset in presets[selected_lib]:
                 del presets[selected_lib][selected_preset]
-                if self.save_presets(presets, file_path):
+                if save_presets(presets, file_path):
                     library_refresh_func() 
                     if isinstance(entry_widget, tk.Text):
                         entry_widget.delete("1.0", tk.END)
