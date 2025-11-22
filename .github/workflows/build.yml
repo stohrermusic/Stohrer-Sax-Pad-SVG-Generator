@@ -2,7 +2,7 @@ name: Build EXE
 
 on:
   push:
-    branches: [ main, beta ]
+    branches: [ main, beta, gamma ]
   workflow_dispatch:
 
 jobs:
