@@ -206,8 +206,6 @@ def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12, shape_factor=0.
     angle_step = (2 * math.pi) / steps
 
     # Calculate power for shaping. 
-    # 0.0 -> Power 1.0 (Sine)
-    # 1.0 -> Power 0.1 (Square-ish)
     power = 1.0 - (0.9 * shape_factor)
 
     for i in range(steps + 1):
@@ -240,8 +238,7 @@ def get_disc_diameter(pad_size, material, settings):
         darts_enabled = settings.get("darts_enabled", True)
         
         if darts_enabled and pad_size < threshold:
-            # --- DART BOOST LOGIC ---
-            # Add extra material to base wrap for stars
+            # DART BOOST: Add extra wrap for stars
             bonus = settings.get("dart_wrap_bonus", 0.75)
             wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"], extra_base=bonus)
         else:
@@ -385,6 +382,7 @@ def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset,
             # 2. Outer Radius (Tip) - The Boosted Wrap
             outer_r = r
             
+            # Safety Check
             if inner_r >= outer_r:
                  inner_r = outer_r - 0.2 
             
@@ -518,7 +516,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x750") 
+        self.top.geometry("1000x600") # WIDER for two columns
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -532,21 +530,13 @@ class OptionsWindow:
         tk.Button(bottom_button_frame, text="Advanced", command=self.app.open_resonance_window).pack(side="right", padx=5)
         tk.Button(bottom_button_frame, text="Revert to Defaults", command=self.revert_to_defaults).pack(side="right", padx=5)
         
-        main_canvas_frame = tk.Frame(self.top)
-        main_canvas_frame.pack(side="top", fill="both", expand=True)
-
-        self.canvas = tk.Canvas(main_canvas_frame, bg="#F0EAD6", highlightthickness=0)
-        self.scrollbar = tk.Scrollbar(main_canvas_frame, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = tk.Frame(self.canvas, bg="#F0EAD6", padx=10, pady=10)
-
-        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        # Main frame holds the two-column grid
+        self.main_frame = tk.Frame(self.top, bg="#F0EAD6", padx=10, pady=10)
+        self.main_frame.pack(side="top", fill="both", expand=True)
         
-        self.top.bind('<MouseWheel>', self._on_mousewheel)
+        # Configure grid columns to share space
+        self.main_frame.columnconfigure(0, weight=1)
+        self.main_frame.columnconfigure(1, weight=1)
 
         # --- Sizing variables ---
         self.unit_var = tk.StringVar(value=self.settings["units"])
@@ -577,20 +567,17 @@ class OptionsWindow:
 
         self.create_option_widgets()
     
-    def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
     def create_option_widgets(self):
-        main_frame = self.scrollable_frame
+        # LEFT COLUMN (Col 0)
         
-        unit_frame = tk.LabelFrame(main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
-        unit_frame.pack(fill="x", pady=5)
+        unit_frame = tk.LabelFrame(self.main_frame, text="Sheet Units", bg="#F0EAD6", padx=5, pady=5)
+        unit_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         tk.Radiobutton(unit_frame, text="Inches (in)", variable=self.unit_var, value="in", bg="#F0EAD6").pack(side="left", padx=5)
         tk.Radiobutton(unit_frame, text="Centimeters (cm)", variable=self.unit_var, value="cm", bg="#F0EAD6").pack(side="left", padx=5)
         tk.Radiobutton(unit_frame, text="Millimeters (mm)", variable=self.unit_var, value="mm", bg="#F0EAD6").pack(side="left", padx=5)
 
-        rules_frame = tk.LabelFrame(main_frame, text="Sizing Rules (Advanced)", bg="#F0EAD6", padx=5, pady=5)
-        rules_frame.pack(fill="x", pady=5)
+        rules_frame = tk.LabelFrame(self.main_frame, text="Sizing Rules (Advanced)", bg="#F0EAD6", padx=5, pady=5)
+        rules_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         rules_frame.columnconfigure(1, weight=1)
 
         tk.Label(rules_frame, text="Felt Diameter Reduction (mm):", bg="#F0EAD6").grid(row=0, column=0, sticky='w', pady=2)
@@ -612,9 +599,15 @@ class OptionsWindow:
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
 
+        export_frame = tk.LabelFrame(self.main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
+        export_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
+
+        # RIGHT COLUMN (Col 1)
+
         # --- NEW DART SETTINGS FRAME ---
-        darts_frame = tk.LabelFrame(main_frame, text="Star / Dart Settings", bg="#F0EAD6", padx=5, pady=5)
-        darts_frame.pack(fill="x", pady=5)
+        darts_frame = tk.LabelFrame(self.main_frame, text="Star / Dart Settings", bg="#F0EAD6", padx=5, pady=5)
+        darts_frame.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=5, pady=5)
         darts_frame.columnconfigure(1, weight=1)
         
         tk.Checkbutton(darts_frame, text="Enable Star / Dart Pattern", variable=self.darts_enabled_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
@@ -631,7 +624,7 @@ class OptionsWindow:
         tk.Label(darts_frame, text="Star Frequency Multiplier (1.0=Default):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
         tk.Entry(darts_frame, textvariable=self.dart_frequency_multiplier_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
 
-        # Row 5: Shape Slider
+        # Shape Slider
         shape_frame = tk.Frame(darts_frame, bg="#F0EAD6")
         shape_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
         tk.Label(shape_frame, text="Shape:", bg="#F0EAD6").pack(side="left")
@@ -642,11 +635,22 @@ class OptionsWindow:
         scale.pack(side="left", fill="x", expand=True, padx=5)
         tk.Label(shape_frame, text="Square", bg="#F0EAD6", font=("Arial", 8)).pack(side="left")
 
-
-        engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
-        engraving_frame.pack(fill="x", pady=5)
+        # Star Engraving Section (MOVED HERE)
+        tk.Label(darts_frame, text="-------------------------", bg="#F0EAD6").grid(row=6, column=0, columnspan=2, pady=5)
+        tk.Checkbutton(darts_frame, text="Show Label on Star Pads", variable=self.dart_engraving_on_var, bg="#F0EAD6").grid(row=7, column=0, columnspan=2, sticky='w', pady=2)
         
-        tk.Checkbutton(engraving_frame, text="Show Size Label (Standard Pads)", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
+        star_loc_frame = tk.Frame(darts_frame, bg="#F0EAD6")
+        star_loc_frame.grid(row=8, column=0, columnspan=2, sticky='ew', pady=2)
+        tk.Radiobutton(star_loc_frame, text="outside", variable=self.dart_engraving_mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="inside", variable=self.dart_engraving_mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="center", variable=self.dart_engraving_mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+        tk.Entry(star_loc_frame, textvariable=self.dart_engraving_val_var, width=5).pack(side="left", padx=5)
+        tk.Label(star_loc_frame, text="mm", bg="#F0EAD6").pack(side="left")
+
+        engraving_frame = tk.LabelFrame(self.main_frame, text="Engraving Settings (Standard Pads)", bg="#F0EAD6", padx=5, pady=5)
+        engraving_frame.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+        
+        tk.Checkbutton(engraving_frame, text="Show Size Label", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
 
         font_size_frame = tk.LabelFrame(engraving_frame, text="Font Sizes (mm)", bg="#F0EAD6", padx=5, pady=5)
         font_size_frame.pack(fill='x', pady=5)
@@ -659,7 +663,7 @@ class OptionsWindow:
             tk.Entry(font_size_frame, textvariable=font_size_var, width=8).grid(row=i, column=1, sticky='w', padx=5, pady=2)
 
 
-        engraving_loc_frame = tk.LabelFrame(main_frame, text="Standard Pad Placement", bg="#F0EAD6", padx=5, pady=5)
+        engraving_loc_frame = tk.LabelFrame(engraving_frame, text="Placement", bg="#F0EAD6", padx=5, pady=5)
         engraving_loc_frame.pack(fill="x", pady=5)
         
         for material in materials:
@@ -671,32 +675,12 @@ class OptionsWindow:
             val_var = tk.DoubleVar(value=self.settings["engraving_location"][material]['value'])
             self.engraving_loc_vars[material] = {'mode': mode_var, 'value': val_var}
 
-            tk.Radiobutton(frame, text="from outside", variable=mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
-            tk.Radiobutton(frame, text="from inside", variable=mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
-            tk.Radiobutton(frame, text="centered", variable=mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="out", variable=mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="in", variable=mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="ctr", variable=mode_var, value="centered", bg="#F0EAD6").pack(side="left")
             
-            tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
+            tk.Entry(frame, textvariable=val_var, width=5).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
-
-        # --- NEW SECTION: STAR PAD ENGRAVING ---
-        star_eng_frame = tk.LabelFrame(engraving_frame, text="Star / Dart Pad Placement", bg="#F0EAD6", padx=5, pady=5)
-        star_eng_frame.pack(fill="x", pady=10)
-
-        tk.Checkbutton(star_eng_frame, text="Show Label on Star Pads", variable=self.dart_engraving_on_var, bg="#F0EAD6").pack(anchor='w')
-        
-        star_loc_frame = tk.Frame(star_eng_frame, bg="#F0EAD6")
-        star_loc_frame.pack(fill='x', pady=2)
-        
-        tk.Radiobutton(star_loc_frame, text="from outside", variable=self.dart_engraving_mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
-        tk.Radiobutton(star_loc_frame, text="from inside", variable=self.dart_engraving_mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
-        tk.Radiobutton(star_loc_frame, text="centered", variable=self.dart_engraving_mode_var, value="centered", bg="#F0EAD6").pack(side="left")
-        
-        tk.Entry(star_loc_frame, textvariable=self.dart_engraving_val_var, width=6).pack(side="left", padx=5)
-        tk.Label(star_loc_frame, text="mm", bg="#F0EAD6").pack(side="left")
-
-        export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
-        export_frame.pack(fill="x", pady=5)
-        tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
 
 
     def save_options(self):
