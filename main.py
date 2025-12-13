@@ -1,11 +1,14 @@
-import svgwrite
-import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
+import os
 import json
-import time
 import random
 import math
+import svgwrite
+
+# ==========================================
+# SECTION 1: CONFIGURATION & DATA
+# ==========================================
 
 # --- Lightburn Color Palette ---
 LIGHTBURN_COLORS = [
@@ -37,8 +40,20 @@ DEFAULT_SETTINGS = {
     "engraving_on": True,
     "show_engraving_warning": True,
     "last_output_dir": "",
-    "resonance_clicks": 0, # Easter Egg Counter
-    "compatibility_mode": False, # For Inkscape/etc.
+    "resonance_clicks": 0, 
+    "compatibility_mode": False,
+    
+    # NEW SETTINGS FOR v2.1 (now v1.0 of Companion)
+    "darts_enabled": True,     
+    "dart_threshold": 18.0,    
+    "dart_overwrap": 0.5,      
+    "dart_wrap_bonus": 0.75, 
+    "dart_frequency_multiplier": 1.0,
+    "dart_shape_factor": 0.0,
+    
+    # DART SPECIFIC ENGRAVING DEFAULTS
+    "dart_engraving_on": True,
+    "dart_engraving_loc": {"mode": "from_outside", "value": 2.5},
     
     "engraving_font_size": {
         "felt": 2.0,
@@ -68,10 +83,11 @@ DEFAULT_SETTINGS = {
     }
 }
 
+# --- Filenames ---
 PAD_PRESET_FILE = "pad_presets.json"
 SETTINGS_FILE = "app_settings.json"
 
-# --- Easter Egg Constants ---
+# --- Constants & Themes ---
 RESONANCE_MESSAGES = [
     "Resonance added!", "Pad resonance increased!", "More resonance now!",
     "Timbral focus enhanced!", "Harmonic alignment optimized!", "Acoustic reflection matrix calibrated!",
@@ -82,6 +98,354 @@ RESONANCE_MESSAGES = [
 ]
 COOL_BLUE = "#E0F7FA"
 COOL_GREEN = "#E8F5E9"
+
+# --- IO Functions ---
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                loaded_settings = json.load(f)
+                settings = DEFAULT_SETTINGS.copy()
+                
+                for key, default_value in DEFAULT_SETTINGS.items():
+                    if key in loaded_settings:
+                        if isinstance(default_value, dict):
+                            settings[key] = default_value.copy()
+                            settings[key].update(loaded_settings[key])
+                        else:
+                            settings[key] = loaded_settings[key]
+                
+                return settings
+        except (json.JSONDecodeError, TypeError):
+            return DEFAULT_SETTINGS.copy()
+    return DEFAULT_SETTINGS.copy()
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        messagebox.showerror("Error Saving Settings", f"Could not save settings:\n{e}")
+
+def load_presets(file_path, preset_type_name="Preset"):
+    data = {}
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+    
+    if data and not any(isinstance(v, dict) for v in data.values()):
+        print(f"Migrating old {preset_type_name} file...")
+        new_data = {"My Presets": data}
+        if save_presets(new_data, file_path):
+            messagebox.showinfo("Library Updated", f"Your existing {preset_type_name} sets have been moved into a new library called 'My Presets'.")
+            return new_data
+        else:
+            return {}
+    
+    return data if data else {}
+
+def save_presets(presets, file_path):
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(presets, f, indent=2)
+        return True
+    except Exception as e:
+        messagebox.showerror("Error Saving Preset", str(e))
+        return False
+
+
+# ==========================================
+# SECTION 2: LOGIC & MATH
+# ==========================================
+
+def calculate_star_path(cx, cy, outer_r, inner_r, num_points=12, shape_factor=0.0):
+    """
+    Generates an SVG path string for a smooth Sine Wave (Flower) shape.
+    shape_factor: 0.0 = Sine, 1.0 = Flattened (Square-ish)
+    """
+    path_data = []
+    
+    avg_r = (outer_r + inner_r) / 2.0
+    amplitude = (outer_r - inner_r) / 2.0
+    
+    steps = int(num_points * 8) 
+    if steps < 64: steps = 64
+    
+    angle_step = (2 * math.pi) / steps
+
+    # Calculate power for shaping. 
+    power = 1.0 - (0.9 * shape_factor)
+
+    for i in range(steps + 1):
+        theta = i * angle_step
+        
+        # Raw Sine Wave (-1 to 1)
+        raw_wave = math.cos(num_points * theta)
+        
+        # Apply Shaping: sign * |raw|^power
+        shaped_wave = (1 if raw_wave >= 0 else -1) * (abs(raw_wave) ** power)
+        
+        r = avg_r + amplitude * shaped_wave
+        
+        x = cx + r * math.cos(theta)
+        y = cy + r * math.sin(theta)
+        
+        command = "M" if i == 0 else "L"
+        path_data.append(f"{command} {x:.3f} {y:.3f}")
+        
+    path_data.append("Z") 
+    return " ".join(path_data)
+
+def get_disc_diameter(pad_size, material, settings):
+    if material == 'felt': return pad_size - settings["felt_offset"]
+    if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
+    if material == 'exact_size': return pad_size
+    
+    if material == 'leather':
+        threshold = settings.get("dart_threshold", 18.0)
+        darts_enabled = settings.get("darts_enabled", True)
+        
+        if darts_enabled and pad_size < threshold:
+            # DART BOOST: Add extra wrap for stars
+            bonus = settings.get("dart_wrap_bonus", 0.75)
+            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"], extra_base=bonus)
+        else:
+            # Standard Wrap
+            wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
+            
+        felt_thickness_mm = get_felt_thickness_mm(settings)
+        diameter = pad_size + 2 * (felt_thickness_mm + wrap)
+        return round(diameter * 2) / 2
+        
+    return 0
+
+def check_for_oversized_engravings(pads, material_vars, settings):
+    oversized = {}
+    for material, var in material_vars.items():
+        if not var.get(): continue
+        
+        font_size = settings["engraving_font_size"].get(material, 2.0)
+        oversized_sizes = set()
+
+        for pad in pads:
+            pad_size = pad['size']
+            diameter = get_disc_diameter(pad_size, material, settings)
+            radius = diameter / 2
+            if font_size >= radius * 0.8:
+                oversized_sizes.add(pad_size)
+        
+        if oversized_sizes:
+            oversized[material] = oversized_sizes
+    return oversized
+
+def leather_back_wrap(pad_size, multiplier, extra_base=0.0):
+    base_wrap = 0
+    if pad_size >= 45:
+        base_wrap = 3.2
+    elif pad_size >= 12:
+        base_wrap = 1.2 + (pad_size - 12) * (2.0 / 33.0)
+    elif pad_size >= 6:
+        base_wrap = 1.0 + (pad_size - 6) * (0.2 / 6.0)
+    else:
+        base_wrap = 1.0
+        
+    # Apply the Dart Bonus (if any) before multiplier
+    total_base = base_wrap + extra_base
+    return total_base * multiplier
+
+def should_have_center_hole(pad_size, hole_dia, settings):
+    min_size = settings.get("min_hole_size", 16.5)
+    return hole_dia > 0 and pad_size >= min_size
+
+def get_felt_thickness_mm(settings):
+    thickness = settings.get("felt_thickness", 3.175)
+    if settings.get("felt_thickness_unit") == "in":
+        return thickness * 25.4
+    return thickness
+
+def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
+    spacing_mm = 1.0
+    discs = []
+    
+    for pad in pads:
+        pad_size, qty = pad['size'], pad['qty']
+        diameter = get_disc_diameter(pad_size, material, settings)
+        for _ in range(qty): discs.append((pad_size, diameter))
+
+    discs.sort(key=lambda x: -x[1])
+    placed = []
+    for _, dia in discs:
+        r = dia / 2
+        placed_successfully = False
+        y = spacing_mm
+        while y + dia + spacing_mm <= height_mm and not placed_successfully:
+            x = spacing_mm
+            while x + dia + spacing_mm <= width_mm:
+                cx, cy = x + r, y + r
+                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
+                if not is_collision:
+                    placed.append((None, cx, cy, r))
+                    placed_successfully = True
+                    break
+                x += 1
+            y += 1
+    
+    return len(placed) == len(discs)
+
+def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset, settings):
+    spacing_mm = 1.0
+    discs = []
+
+    for pad in pads:
+        pad_size, qty = pad['size'], pad['qty']
+        diameter = get_disc_diameter(pad_size, material, settings)
+        for _ in range(qty): discs.append((pad_size, diameter))
+
+    discs.sort(key=lambda x: -x[1])
+    placed = []
+    for pad_size, dia in discs:
+        r = dia / 2
+        placed_successfully = False
+        y = spacing_mm
+        while y + dia + spacing_mm <= height_mm and not placed_successfully:
+            x = spacing_mm
+            while x + dia + spacing_mm <= width_mm:
+                cx, cy = x + r, y + r
+                # Check collision using standard circle r
+                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
+                if not is_collision:
+                    placed.append((pad_size, cx, cy, r))
+                    placed_successfully = True
+                    break
+                x += 1
+            y += 1
+
+    compatibility_mode = settings.get("compatibility_mode", False)
+    
+    if compatibility_mode:
+        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), viewBox=f"0 0 {width_mm} {height_mm}")
+        stroke_w = 0.1
+    else:
+        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
+        stroke_w = '0.1mm'
+
+    layer_colors = settings.get("layer_colors", DEFAULT_SETTINGS["layer_colors"])
+
+    for pad_size, cx, cy, r in placed:
+        
+        threshold = settings.get("dart_threshold", 18.0)
+        darts_enabled = settings.get("darts_enabled", True)
+        
+        is_dart_pad = (material == 'leather' and darts_enabled and pad_size < threshold)
+        
+        if is_dart_pad:
+            # --- STAR LOGIC ---
+            felt_thick = get_felt_thickness_mm(settings)
+            overwrap = settings.get("dart_overwrap", 0.5)
+            
+            # 1. Inner Radius (Valley) - Safe Zone
+            felt_r = (pad_size - settings["felt_offset"]) / 2
+            inner_r = felt_r + felt_thick + overwrap
+            
+            # 2. Outer Radius (Tip) - The Boosted Wrap
+            # 'r' is the full Boosted radius from get_disc_diameter
+            outer_r = r
+            
+            # Safety Check
+            if inner_r >= outer_r:
+                 inner_r = outer_r - 0.2 
+            
+            # 3. Dynamic Points & Shape
+            circumference = 2 * math.pi * inner_r
+            freq_mult = settings.get("dart_frequency_multiplier", 1.0)
+            num_points = int((circumference / 3.5) * freq_mult)
+            if num_points < 12: num_points = 12 
+            if num_points % 2 != 0: num_points += 1 
+            
+            shape_factor = settings.get("dart_shape_factor", 0.0)
+            
+            path_d = calculate_star_path(cx, cy, outer_r, inner_r, num_points=num_points, shape_factor=shape_factor)
+            
+            dwg.add(dwg.path(d=path_d, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+        else:
+            # --- STANDARD CIRCLE LOGIC ---
+            if compatibility_mode:
+                dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+            else:
+                dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+
+        hole_dia = 0
+        if should_have_center_hole(pad_size, hole_dia_preset, settings):
+            hole_dia = hole_dia_preset
+
+        if hole_dia > 0:
+            if compatibility_mode:
+                dwg.add(dwg.circle(center=(cx, cy), r=hole_dia / 2, stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
+            else:
+                dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
+
+        font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
+        
+        # --- Determine Engraving Settings (Standard vs Star) ---
+        should_engrave = False
+        
+        if is_dart_pad:
+            # Use Star Specific Settings
+            if settings.get("dart_engraving_on", True):
+                engraving_settings = settings.get("dart_engraving_loc", {"mode": "from_outside", "value": 2.5})
+                should_engrave = True
+        else:
+            # Use Standard Settings
+            if settings.get("engraving_on", True):
+                engraving_settings = settings["engraving_location"][material]
+                should_engrave = True
+
+        # Safety Check: Don't engrave if text is wider than the pad radius
+        if should_engrave and (font_size >= r * 0.8):
+            should_engrave = False
+        
+        if should_engrave:
+            mode = engraving_settings['mode']
+            value = engraving_settings['value']
+            
+            engraving_y = 0
+            if mode == 'from_outside':
+                engraving_y = cy - (r - value)
+            elif mode == 'from_inside':
+                hole_r = hole_dia / 2 if hole_dia > 0 else 0
+                engraving_y = cy - (hole_r + value)
+            else: # centered
+                hole_r = hole_dia / 2 if hole_dia > 0 else 1.75
+                offset_from_center = (r + hole_r) / 2
+                engraving_y = cy - offset_from_center
+
+            vertical_adjust = font_size * 0.35
+            text_content = f"{pad_size:.1f}".rstrip('0').rstrip('.')
+            
+            if compatibility_mode:
+                dwg.add(dwg.text(text_content,
+                                 insert=(cx, engraving_y + vertical_adjust),
+                                 text_anchor="middle",
+                                 font_size=font_size,
+                                 fill=layer_colors[f'{material}_engraving']))
+            else:
+                dwg.add(dwg.text(text_content,
+                                 insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
+                                 text_anchor="middle",
+                                 font_size=f"{font_size}mm",
+                                 fill=layer_colors[f'{material}_engraving']))
+        
+    dwg.save()
+
+# ==========================================
+# SECTION 3: GUI DIALOGS
+# ==========================================
 
 class ConfirmationDialog(tk.Toplevel):
     def __init__(self, parent, title, message):
@@ -117,499 +481,6 @@ class ConfirmationDialog(tk.Toplevel):
         self.result = False
         self.destroy()
 
-class PadSVGGeneratorApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Stohrer Sax Pad SVG Generator")
-        self.root.geometry("640x700")
-        self.default_bg = "#FFFDD0"
-        self.root.configure(bg=self.default_bg)
-
-        self.settings = self.load_settings()
-        self.pad_presets = self.load_presets(PAD_PRESET_FILE, preset_type_name="Pad Preset")
-        
-        self.create_menus()
-        self.create_main_ui() # Created directly, no more Notebook tabs
-        
-        self.apply_resonance_theme()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
-
-    def on_exit(self):
-        # Save settings from pad generator
-        self.settings["sheet_width"] = self.width_entry.get()
-        self.settings["sheet_height"] = self.height_entry.get()
-        self.settings["hole_option"] = self.hole_var.get()
-        if self.hole_var.get() == "Custom":
-            self.settings["custom_hole_size"] = self.custom_hole_entry.get()
-        self.save_settings()
-        self.root.destroy()
-
-    def load_settings(self):
-        if os.path.exists(SETTINGS_FILE):
-            try:
-                with open(SETTINGS_FILE, 'r') as f:
-                    loaded_settings = json.load(f)
-                    settings = DEFAULT_SETTINGS.copy()
-                    
-                    for key, default_value in DEFAULT_SETTINGS.items():
-                        if key in loaded_settings:
-                            if isinstance(default_value, dict):
-                                settings[key] = default_value.copy()
-                                settings[key].update(loaded_settings[key])
-                            else:
-                                settings[key] = loaded_settings[key]
-                    
-                    # Cleanup old dart keys if present
-                    dart_keys = [k for k in settings if k.startswith("dart_")]
-                    for k in dart_keys:
-                        if k in settings:
-                            del settings[k]
-                        
-                    return settings
-            except (json.JSONDecodeError, TypeError):
-                return DEFAULT_SETTINGS.copy()
-        return DEFAULT_SETTINGS.copy()
-
-
-    def save_settings(self):
-        try:
-            dart_keys = [k for k in self.settings if k.startswith("dart_")]
-            for k in dart_keys:
-                 if k in self.settings:
-                    del self.settings[k]
-            
-            with open(SETTINGS_FILE, 'w') as f:
-                json.dump(self.settings, f, indent=2)
-        except Exception as e:
-            messagebox.showerror("Error Saving Settings", f"Could not save settings:\n{e}")
-            
-    def apply_resonance_theme(self):
-        clicks = self.settings.get("resonance_clicks", 0)
-        color = self.default_bg
-        if 10 <= clicks < 50:
-            color = COOL_BLUE
-        elif 50 <= clicks < 100:
-            color = COOL_GREEN
-
-        self.set_background_color(self.root, color)
-        if clicks < 100:
-            self.root.attributes('-alpha', 1.0)
-
-
-    def set_background_color(self, parent, color):
-        try:
-            parent.configure(bg=color)
-        except tk.TclError:
-            pass
-        
-        # Configure ttk styles
-        style = ttk.Style()
-        style.configure('App.TFrame', background=color)
-
-        for widget in parent.winfo_children():
-            widget_class = widget.winfo_class()
-            
-            if widget_class in ('Frame', 'Label', 'Radiobutton', 'Checkbutton', 'LabelFrame'):
-                try:
-                    widget.configure(bg=color)
-                except tk.TclError:
-                    pass
-            elif widget_class in ('TFrame', 'TLabel', 'TRadiobutton', 'TCheckbutton', 'TLabelframe'):
-                try:
-                    style_name = f"{widget_class}.{color.upper()}"
-                    style.configure(style_name, background=color)
-                    widget.configure(style=style_name)
-                except tk.TclError:
-                    pass
-
-            if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame)):
-                self.set_background_color(widget, color)
-
-
-    def create_menus(self):
-        # --- Main Menu ---
-        self.menu_bar = tk.Menu(self.root)
-        
-        file_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.menu_bar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Import Pad Presets...", command=self.on_import_pad_presets)
-        file_menu.add_command(label="Export Pad Presets...", command=self.on_export_pad_presets)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.on_exit)
-
-        options_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.menu_bar.add_cascade(label="Options", menu=options_menu)
-        options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
-        options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
-        
-        self.root.config(menu=self.menu_bar)
-
-
-    def create_main_ui(self):
-        # Create a main frame to hold everything
-        main_frame = tk.Frame(self.root, bg=self.root.cget('bg'), padx=10, pady=10)
-        main_frame.pack(expand=True, fill="both")
-
-        tk.Label(main_frame, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
-        self.pad_entry = tk.Text(main_frame, height=10)
-        self.pad_entry.pack(fill="x", padx=10)
-
-        preset_frame = tk.Frame(main_frame, bg=self.root.cget('bg'))
-        preset_frame.pack(pady=10)
-        
-        tk.Button(preset_frame, text="Save as Preset", command=self.on_save_pad_preset).pack(side="left", padx=5)
-        
-        # --- Library Dropdown for Pads ---
-        tk.Label(preset_frame, text="Library:", bg=self.root.cget('bg')).pack(side="left", padx=(10, 2))
-        self.pad_library_var = tk.StringVar()
-        self.pad_library_dropdown = ttk.Combobox(preset_frame, textvariable=self.pad_library_var, state="readonly", width=15)
-        self.pad_library_dropdown.pack(side="left")
-        self.pad_library_dropdown.bind("<<ComboboxSelected>>", self.on_pad_library_selected)
-        
-        preset_names = [] 
-        self.pad_preset_var = tk.StringVar()
-        self.pad_preset_menu = ttk.Combobox(preset_frame, textvariable=self.pad_preset_var, values=preset_names, state="readonly", width=40)
-        self.pad_preset_menu.set("Load Pad Preset")
-        self.pad_preset_menu.pack(side="left", padx=5)
-        self.pad_preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_pad_preset(self.pad_preset_var.get()))
-        
-        tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_pad_preset).pack(side="left", padx=5)
-
-        self.update_pad_library_dropdown() # Initial population
-
-        tk.Label(main_frame, text="Select materials:", bg=self.root.cget('bg')).pack(pady=5)
-        self.material_vars = {
-            'felt': tk.BooleanVar(value=True), 
-            'card': tk.BooleanVar(value=True), 
-            'leather': tk.BooleanVar(value=True),
-            'exact_size': tk.BooleanVar(value=False)
-        }
-        for m in self.material_vars:
-            tk.Checkbutton(main_frame, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg=self.root.cget('bg')).pack(anchor='w', padx=20)
-
-        options_frame = tk.Frame(main_frame, bg=self.root.cget('bg'))
-        options_frame.pack(pady=10, fill='x', padx=10)
-
-        hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg=self.root.cget('bg'), padx=5, pady=5)
-        hole_frame.pack(fill="x")
-        self.hole_var = tk.StringVar(value=self.settings["hole_option"])
-        
-        tk.Radiobutton(hole_frame, text="None", variable=self.hole_var, value="No center holes", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="3.0mm", variable=self.hole_var, value="3.0mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="3.5mm", variable=self.hole_var, value="3.5mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
-        tk.Radiobutton(hole_frame, text="Custom:", variable=self.hole_var, value="Custom", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
-        
-        self.custom_hole_entry = tk.Entry(hole_frame, width=6)
-        self.custom_hole_entry.insert(0, self.settings.get("custom_hole_size", "4.0"))
-        self.custom_hole_entry.pack(side="left", padx=2)
-        tk.Label(hole_frame, text="mm", bg=self.root.cget('bg')).pack(side="left")
-        self.toggle_custom_hole_entry()
-
-        sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg=self.root.cget('bg'), padx=5, pady=5)
-        sheet_frame.pack(fill="x", pady=(10,0))
-
-        self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg=self.root.cget('bg'))
-        self.unit_label.grid(row=0, column=0, sticky='w', padx=5)
-        self.width_entry = tk.Entry(sheet_frame)
-        self.width_entry.insert(0, self.settings["sheet_width"])
-        self.width_entry.grid(row=0, column=1, sticky='w')
-
-        self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg=self.root.cget('bg'))
-        self.height_label.grid(row=1, column=0, sticky='w', padx=5)
-        self.height_entry = tk.Entry(sheet_frame)
-        self.height_entry.insert(0, self.settings["sheet_height"])
-        self.height_entry.grid(row=1, column=1, sticky='w')
-
-        tk.Label(main_frame, text="Output filename base (no extension):", bg=self.root.cget('bg')).pack(pady=5)
-        self.filename_entry = tk.Entry(main_frame)
-        self.filename_entry.insert(0, "my_pad_job")
-        self.filename_entry.pack(padx=10) 
-
-        tk.Button(main_frame, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
-        
-
-    def on_pad_library_selected(self, event=None):
-        lib_name = self.pad_library_var.get()
-        preset_list = []
-        if lib_name == "All Libraries":
-            for library, presets in sorted(self.pad_presets.items()):
-                for name in sorted(presets.keys()):
-                    preset_list.append(f"[{library}] {name}")
-        else:
-            preset_list = sorted(self.pad_presets.get(lib_name, {}).keys())
-        
-        self.pad_preset_menu['values'] = preset_list
-        self.pad_preset_menu.set("Load Pad Preset")
-
-    def update_pad_library_dropdown(self):
-        lib_names = ["All Libraries"] + sorted(self.pad_presets.keys())
-        self.pad_library_dropdown['values'] = lib_names
-        self.pad_library_var.set("All Libraries")
-        self.on_pad_library_selected()
-
-    # --- Pad Preset Import/Export ---
-    def on_import_pad_presets(self):
-        filepath = filedialog.askopenfilename(
-            title="Import Pad Presets",
-            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
-            initialdir=self.settings.get("last_output_dir", "")
-        )
-        if not filepath:
-            return
-        try:
-            with open(filepath, 'r') as f:
-                imported_presets = json.load(f)
-            if not isinstance(imported_presets, dict):
-                raise TypeError("File is not a valid preset dictionary.")
-
-            target_lib = ImportTargetWindow(self.root, list(self.pad_presets.keys())).get_target_library()
-            if not target_lib:
-                return # User cancelled
-
-            if target_lib not in self.pad_presets:
-                self.pad_presets[target_lib] = {}
-
-            ImportPresetsWindow(self.root, self.pad_presets[target_lib], imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self, "Pad Preset", save_data=self.pad_presets)
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Could not import pad presets:\n{e}")
-
-    def on_export_pad_presets(self):
-        ExportPresetsWindow(self.root, self.pad_presets, "Pad Presets", "pad_preset_export.json", False)
-
-
-    def toggle_custom_hole_entry(self):
-        if self.hole_var.get() == "Custom":
-            self.custom_hole_entry.config(state='normal')
-        else:
-            self.custom_hole_entry.config(state='disabled')
-
-    def open_options_window(self):
-        OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, self.save_settings)
-        
-    def open_color_window(self):
-        LayerColorWindow(self.root, self.settings, self.save_settings)
-        
-    def open_resonance_window(self):
-        ResonanceWindow(self.root, self.settings, self.save_settings, self.apply_resonance_theme)
-
-    def update_ui_from_settings(self):
-        self.unit_label.config(text=f"Width ({self.settings['units']}):")
-        self.height_label.config(text=f"Height ({self.settings['units']}):")
-
-    def get_hole_dia(self):
-        hole_option = self.hole_var.get()
-        if hole_option == "3.5mm": return 3.5
-        if hole_option == "3.0mm": return 3.0
-        if hole_option == "Custom":
-            try:
-                return float(self.custom_hole_entry.get())
-            except (ValueError, TypeError):
-                messagebox.showerror("Invalid Input", "Custom hole size must be a valid number.")
-                return None
-        return 0
-
-    def on_generate(self):
-        try:
-            hole_dia = self.get_hole_dia()
-            if hole_dia is None: return
-
-            pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
-            if not pads:
-                messagebox.showerror("Error", "No valid pad sizes entered.")
-                return
-
-            if self.settings.get("engraving_on", True):
-                oversized_engravings = check_for_oversized_engravings(pads, self.material_vars, self.settings)
-                if oversized_engravings and self.settings.get("show_engraving_warning", True):
-                    message = "Warning: The current font size is too large for some pads and the engraving will be skipped:\n\n"
-                    for mat, sizes in oversized_engravings.items():
-                        message += f"- {mat.replace('_', ' ').capitalize()}: {', '.join(map(str, sorted(sizes)))}\n"
-                    message += "\nDo you want to proceed?"
-
-                    dialog = ConfirmationDialog(self.root, "Engraving Size Warning", message)
-                    if not dialog.result:
-                        return
-                    if dialog.dont_show_again.get():
-                        self.settings["show_engraving_warning"] = False
-
-            width_val = float(self.width_entry.get())
-            height_val = float(self.height_entry.get())
-            
-            if self.settings['units'] == 'in':
-                width_mm, height_mm = width_val * 25.4, height_val * 25.4
-            elif self.settings['units'] == 'cm':
-                width_mm, height_mm = width_val * 10, height_val * 10
-            elif self.settings['units'] == 'mm':
-                width_mm, height_mm = width_val, height_val
-            else:
-                messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
-                return
-
-
-            base = self.filename_entry.get().strip()
-            if not base:
-                messagebox.showerror("Error", "Please enter a base filename.")
-                return
-            
-            for material, var in self.material_vars.items():
-                if var.get() and not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
-                    messagebox.showerror("Nesting Error", f"Could not fit all '{material.replace('_',' ')}' pieces on the specified sheet size.")
-                    return
-
-            save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs", initialdir=self.settings.get("last_output_dir", ""))
-            if not save_dir:
-                return
-            
-            self.settings["last_output_dir"] = save_dir 
-
-            files_generated = False
-            for material, var in self.material_vars.items():
-                if var.get():
-                    filename = os.path.join(save_dir, f"{base}_{material}.svg")
-                    generate_svg(pads, material, width_mm, height_mm, filename, hole_dia, self.settings)
-                    files_generated = True
-            
-            if files_generated:
-                self.save_settings() 
-                messagebox.showinfo("Done", "SVGs generated successfully.")
-            else:
-                messagebox.showwarning("No Materials Selected", "Please select at least one material.")
-
-        except Exception as e:
-            print(f"An error occurred during SVG generation: {e}")
-            messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
-
-    def parse_pad_list(self, pad_input):
-        pad_list = []
-        for line in pad_input.strip().splitlines():
-            try:
-                size, qty = map(float, line.strip().lower().split('x'))
-                pad_list.append({'size': size, 'qty': int(qty)})
-            except ValueError:
-                continue
-        return pad_list
-
-    def load_presets(self, file_path, preset_type_name="Preset", is_flat=False):
-        data = {}
-        if os.path.exists(file_path):
-            try:
-                with open(file_path, 'r') as f:
-                    data = json.load(f)
-                if not isinstance(data, dict):
-                    data = {}
-            except (json.JSONDecodeError, TypeError):
-                data = {}
-        
-        # Check for migration (flat file to library nested)
-        if data and not any(isinstance(v, dict) for v in data.values()):
-            print(f"Migrating old {preset_type_name} file...")
-            new_data = {"My Presets": data}
-            if self.save_presets(new_data, file_path):
-                messagebox.showinfo("Library Updated", f"Your existing {preset_type_name} sets have been moved into a new library called 'My Presets'.")
-                return new_data
-            else:
-                return {"My Presets": {}}
-        
-        return data if data else {"My Presets": {}}
-
-
-    def save_presets(self, presets, file_path):
-        try:
-            with open(file_path, 'w') as f:
-                json.dump(presets, f, indent=2)
-            return True
-        except Exception as e:
-            messagebox.showerror("Error Saving Preset", str(e))
-            return False
-
-    def on_save_preset(self, presets, file_path, entry_widget, menu_widget, preset_type_name, library_var):
-        active_library = library_var.get()
-        if not active_library or active_library == "All Libraries":
-            messagebox.showwarning("Save Error", "Please select a specific library to save to.")
-            return
-
-        name = simpledialog.askstring(f"Save {preset_type_name} Preset", "Enter a name for this preset:")
-        if name:
-            text_data = entry_widget.get("1.0", tk.END)
-            if not text_data.strip():
-                messagebox.showwarning(f"Save {preset_type_name} Preset", "Cannot save an empty list.")
-                return
-            
-            if active_library not in presets:
-                presets[active_library] = {}
-
-            if name in presets[active_library]:
-                if not messagebox.askyesno("Overwrite", f"A set named '{name}' already exists in this library. Overwrite it?"):
-                    return
-            
-            presets[active_library][name] = text_data
-            if self.save_presets(presets, file_path):
-                self.on_pad_library_selected()
-                messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
-
-    def on_load_preset(self, selected_name, presets, entry_widget, library_var, load_label):
-        if not selected_name or selected_name == load_label:
-            return
-            
-        lib_name = library_var.get()
-        data = None
-        
-        if lib_name == "All Libraries":
-            try:
-                lib_name, preset_name = selected_name.split("] ", 1)
-                lib_name = lib_name[1:] # Remove starting '['
-                if lib_name in presets and preset_name in presets[lib_name]:
-                    data = presets[lib_name][preset_name]
-            except ValueError:
-                return # Malformed name
-        else:
-            # We are in a specific library
-            if lib_name in presets and selected_name in presets[lib_name]:
-                data = presets[lib_name][selected_name]
-
-        if data:
-            entry_widget.delete("1.0", tk.END)
-            entry_widget.insert(tk.END, data)
-
-    def on_delete_preset(self, presets, file_path, preset_var, menu_widget, entry_widget, preset_type_name, library_var, library_refresh_func):
-        selected_lib = library_var.get()
-        selected_preset = preset_var.get()
-
-        if not selected_preset or selected_preset.startswith("Load"):
-            messagebox.showwarning("Delete Error", "Please load a set to delete.")
-            return
-
-        if selected_lib == "All Libraries":
-            try:
-                selected_lib, selected_preset = selected_preset.split("] ", 1)
-                selected_lib = selected_lib[1:]
-            except ValueError:
-                messagebox.showerror("Delete Error", "Cannot delete from 'All Libraries' view. Please select the specific library first.")
-                return
-        
-        if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
-            if selected_lib in presets and selected_preset in presets[selected_lib]:
-                del presets[selected_lib][selected_preset]
-                if self.save_presets(presets, file_path):
-                    library_refresh_func() # Refresh preset list
-                    if isinstance(entry_widget, tk.Text):
-                        entry_widget.delete("1.0", tk.END)
-                    messagebox.showinfo("Preset Deleted", f"Preset '{selected_preset}' deleted.")
-            else:
-                messagebox.showerror("Delete Error", "Could not find the preset to delete.")
-    
-    # --- Wrappers for new preset system ---
-    def on_save_pad_preset(self):
-        self.on_save_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_entry, self.pad_preset_menu, "Pad", self.pad_library_var)
-        
-    def on_delete_pad_preset(self):
-        self.on_delete_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_preset_var, self.pad_preset_menu, self.pad_entry, "Pad", self.pad_library_var, self.on_pad_library_selected)
-    
-    def on_load_pad_preset(self, selected_name):
-        self.on_load_preset(selected_name, self.pad_presets, self.pad_entry, self.pad_library_var, "Load Pad Preset")
-        
-# ... (rest of the classes) ...
-
 class OptionsWindow:
     def __init__(self, parent, app, settings, update_callback, save_callback):
         self.app = app
@@ -619,7 +490,7 @@ class OptionsWindow:
         
         self.top = tk.Toplevel(parent)
         self.top.title("Sizing Rules")
-        self.top.geometry("500x700") 
+        self.top.geometry("500x750") 
         self.top.configure(bg="#F0EAD6")
         self.top.transient(parent)
         self.top.grab_set()
@@ -659,12 +530,24 @@ class OptionsWindow:
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
-        # --- Engraving variables ---
+        # NEW VARS FOR v2.1
+        self.darts_enabled_var = tk.BooleanVar(value=self.settings.get("darts_enabled", True))
+        self.dart_threshold_var = tk.DoubleVar(value=self.settings.get("dart_threshold", 18.0))
+        self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 0.5))
+        self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 0.75))
+        self.dart_frequency_multiplier_var = tk.DoubleVar(value=self.settings.get("dart_frequency_multiplier", 1.0))
+        self.dart_shape_factor_var = tk.DoubleVar(value=self.settings.get("dart_shape_factor", 0.0))
+        
         self.engraving_on_var = tk.BooleanVar(value=self.settings["engraving_on"])
         self.compatibility_mode_var = tk.BooleanVar(value=self.settings.get("compatibility_mode", False))
         self.engraving_font_size_vars = {}
         self.engraving_loc_vars = {}
         
+        # --- NEW: Dart Engraving Vars ---
+        self.dart_engraving_on_var = tk.BooleanVar(value=self.settings.get("dart_engraving_on", True))
+        self.dart_engraving_mode_var = tk.StringVar(value=self.settings.get("dart_engraving_loc", {}).get("mode", "from_outside"))
+        self.dart_engraving_val_var = tk.DoubleVar(value=self.settings.get("dart_engraving_loc", {}).get("value", 2.5))
+
         self.create_option_widgets()
     
     def _on_mousewheel(self, event):
@@ -702,10 +585,53 @@ class OptionsWindow:
         tk.Radiobutton(felt_thickness_frame, text="in", variable=self.felt_thickness_unit_var, value="in", bg="#F0EAD6").pack(side="left")
         tk.Radiobutton(felt_thickness_frame, text="mm", variable=self.felt_thickness_unit_var, value="mm", bg="#F0EAD6").pack(side="left")
 
-        engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings", bg="#F0EAD6", padx=5, pady=5)
+        # --- NEW DART SETTINGS FRAME ---
+        darts_frame = tk.LabelFrame(main_frame, text="Star / Dart Settings", bg="#F0EAD6", padx=5, pady=5)
+        darts_frame.pack(fill="x", pady=5)
+        darts_frame.columnconfigure(1, weight=1)
+        
+        tk.Checkbutton(darts_frame, text="Enable Star / Dart Pattern", variable=self.darts_enabled_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+        
+        tk.Label(darts_frame, text="Use Star Pattern below (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_threshold_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
+
+        tk.Label(darts_frame, text="Star Safe Overwrap (Valley) (mm):", bg="#F0EAD6").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_overwrap_var, width=10).grid(row=2, column=1, sticky='w', pady=2)
+
+        tk.Label(darts_frame, text="Star Wrap Bonus (Adds to Tip) (mm):", bg="#F0EAD6").grid(row=3, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_wrap_bonus_var, width=10).grid(row=3, column=1, sticky='w', pady=2)
+
+        tk.Label(darts_frame, text="Star Frequency Multiplier (1.0=Default):", bg="#F0EAD6").grid(row=4, column=0, sticky='w', pady=2)
+        tk.Entry(darts_frame, textvariable=self.dart_frequency_multiplier_var, width=10).grid(row=4, column=1, sticky='w', pady=2)
+
+        # Row 5: Shape Slider
+        shape_frame = tk.Frame(darts_frame, bg="#F0EAD6")
+        shape_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
+        
+        tk.Label(shape_frame, text="Shape:", bg="#F0EAD6").pack(side="left")
+        tk.Label(shape_frame, text="Sine", bg="#F0EAD6", font=("Arial", 8)).pack(side="left", padx=(5, 0))
+        scale = tk.Scale(shape_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, 
+                         variable=self.dart_shape_factor_var, showvalue=0, 
+                         bg="#F0EAD6", highlightthickness=0, length=150, resolution=0.01)
+        scale.pack(side="left", fill="x", expand=True, padx=5)
+        tk.Label(shape_frame, text="Square", bg="#F0EAD6", font=("Arial", 8)).pack(side="left")
+
+        # Star Engraving Section (Nested Here)
+        tk.Label(darts_frame, text="-------------------------", bg="#F0EAD6").grid(row=6, column=0, columnspan=2, pady=5)
+        tk.Checkbutton(darts_frame, text="Show Label on Star Pads", variable=self.dart_engraving_on_var, bg="#F0EAD6").grid(row=7, column=0, columnspan=2, sticky='w', pady=2)
+        
+        star_loc_frame = tk.Frame(darts_frame, bg="#F0EAD6")
+        star_loc_frame.grid(row=8, column=0, columnspan=2, sticky='ew', pady=2)
+        tk.Radiobutton(star_loc_frame, text="outside", variable=self.dart_engraving_mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="inside", variable=self.dart_engraving_mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(star_loc_frame, text="center", variable=self.dart_engraving_mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+        tk.Entry(star_loc_frame, textvariable=self.dart_engraving_val_var, width=5).pack(side="left", padx=5)
+        tk.Label(star_loc_frame, text="mm", bg="#F0EAD6").pack(side="left")
+
+        engraving_frame = tk.LabelFrame(main_frame, text="Engraving Settings (Standard Pads)", bg="#F0EAD6", padx=5, pady=5)
         engraving_frame.pack(fill="x", pady=5)
         
-        tk.Checkbutton(engraving_frame, text="Show Size Label (Engraving)", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
+        tk.Checkbutton(engraving_frame, text="Show Size Label", variable=self.engraving_on_var, bg="#F0EAD6").pack(anchor='w')
 
         font_size_frame = tk.LabelFrame(engraving_frame, text="Font Sizes (mm)", bg="#F0EAD6", padx=5, pady=5)
         font_size_frame.pack(fill='x', pady=5)
@@ -718,7 +644,7 @@ class OptionsWindow:
             tk.Entry(font_size_frame, textvariable=font_size_var, width=8).grid(row=i, column=1, sticky='w', padx=5, pady=2)
 
 
-        engraving_loc_frame = tk.LabelFrame(main_frame, text="Engraving Placement", bg="#F0EAD6", padx=5, pady=5)
+        engraving_loc_frame = tk.LabelFrame(engraving_frame, text="Placement", bg="#F0EAD6", padx=5, pady=5)
         engraving_loc_frame.pack(fill="x", pady=5)
         
         for material in materials:
@@ -730,13 +656,13 @@ class OptionsWindow:
             val_var = tk.DoubleVar(value=self.settings["engraving_location"][material]['value'])
             self.engraving_loc_vars[material] = {'mode': mode_var, 'value': val_var}
 
-            tk.Radiobutton(frame, text="from outside", variable=mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
-            tk.Radiobutton(frame, text="from inside", variable=mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
-            tk.Radiobutton(frame, text="centered", variable=mode_var, value="centered", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="out", variable=mode_var, value="from_outside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="in", variable=mode_var, value="from_inside", bg="#F0EAD6").pack(side="left")
+            tk.Radiobutton(frame, text="ctr", variable=mode_var, value="centered", bg="#F0EAD6").pack(side="left")
             
-            tk.Entry(frame, textvariable=val_var, width=6).pack(side="left", padx=5)
+            tk.Entry(frame, textvariable=val_var, width=5).pack(side="left", padx=5)
             tk.Label(frame, text="mm", bg="#F0EAD6").pack(side="left")
-            
+
         export_frame = tk.LabelFrame(main_frame, text="Export Settings", bg="#F0EAD6", padx=5, pady=5)
         export_frame.pack(fill="x", pady=5)
         tk.Checkbutton(export_frame, text="Enable Inkscape/Compatibility Mode (unitless SVG)", variable=self.compatibility_mode_var, bg="#F0EAD6").pack(anchor='w')
@@ -752,6 +678,14 @@ class OptionsWindow:
         self.settings["felt_thickness"] = self.felt_thickness_var.get()
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
+        # NEW SAVE LOGIC
+        self.settings["darts_enabled"] = self.darts_enabled_var.get()
+        self.settings["dart_threshold"] = self.dart_threshold_var.get()
+        self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
+        self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
+        self.settings["dart_frequency_multiplier"] = self.dart_frequency_multiplier_var.get()
+        self.settings["dart_shape_factor"] = self.dart_shape_factor_var.get()
+        
         # Engraving
         self.settings["engraving_on"] = self.engraving_on_var.get()
         for material, var in self.engraving_font_size_vars.items():
@@ -761,10 +695,17 @@ class OptionsWindow:
             self.settings["engraving_location"][material]['mode'] = vars['mode'].get()
             self.settings["engraving_location"][material]['value'] = vars['value'].get()
             
+        # NEW STAR ENGRAVING SAVE
+        self.settings["dart_engraving_on"] = self.dart_engraving_on_var.get()
+        self.settings["dart_engraving_loc"] = {
+            "mode": self.dart_engraving_mode_var.get(),
+            "value": self.dart_engraving_val_var.get()
+        }
+            
         # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
         
-        self.save_callback()
+        save_settings(self.settings)
         self.update_callback()
         self.top.destroy()
 
@@ -779,6 +720,14 @@ class OptionsWindow:
             self.felt_thickness_var.set(DEFAULT_SETTINGS["felt_thickness"])
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
             
+            # NEW REVERT LOGIC
+            self.darts_enabled_var.set(DEFAULT_SETTINGS.get("darts_enabled", True))
+            self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
+            self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 0.5))
+            self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 0.75))
+            self.dart_frequency_multiplier_var.set(DEFAULT_SETTINGS.get("dart_frequency_multiplier", 1.0))
+            self.dart_shape_factor_var.set(DEFAULT_SETTINGS.get("dart_shape_factor", 0.0))
+            
             # Engraving
             self.engraving_on_var.set(DEFAULT_SETTINGS["engraving_on"])
             for material, var in self.engraving_font_size_vars.items():
@@ -788,6 +737,11 @@ class OptionsWindow:
                  vars['mode'].set(DEFAULT_SETTINGS["engraving_location"][material]['mode'])
                  vars['value'].set(DEFAULT_SETTINGS["engraving_location"][material]['value'])
                  
+            # Revert Star Engraving
+            self.dart_engraving_on_var.set(True)
+            self.dart_engraving_mode_var.set("from_outside")
+            self.dart_engraving_val_var.set(2.5)
+
             # Export
             self.compatibility_mode_var.set(DEFAULT_SETTINGS.get("compatibility_mode", False))
 
@@ -1232,189 +1186,431 @@ class ImportTargetWindow(tk.Toplevel):
     def get_target_library(self):
         return self.target_library
 
-# --- Core SVG Generation Logic ---
-def get_disc_diameter(pad_size, material, settings):
-    if material == 'felt': return pad_size - settings["felt_offset"]
-    if material == 'card': return pad_size - (settings["felt_offset"] + settings["card_to_felt_offset"])
-    if material == 'leather':
-        wrap = leather_back_wrap(pad_size, settings["leather_wrap_multiplier"])
-        felt_thickness_mm = get_felt_thickness_mm(settings)
-        diameter = pad_size + 2 * (felt_thickness_mm + wrap)
-        return round(diameter * 2) / 2
-    if material == 'exact_size': return pad_size
-    return 0
 
-def check_for_oversized_engravings(pads, material_vars, settings):
-    oversized = {}
-    for material, var in material_vars.items():
-        if not var.get(): continue
+# ==========================================
+# SECTION 4: MAIN APP CLASS (main)
+# ==========================================
+
+class PadSVGGeneratorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Stohrer Sax Pad SVG Generator")
+        self.root.geometry("640x700")
+        self.default_bg = "#FFFDD0"
+        self.root.configure(bg=self.default_bg)
+
+        self.settings = load_settings()
+        self.pad_presets = load_presets(PAD_PRESET_FILE, preset_type_name="Pad Preset")
         
-        font_size = settings["engraving_font_size"].get(material, 2.0)
-        oversized_sizes = set()
-
-        for pad in pads:
-            pad_size = pad['size']
-            diameter = get_disc_diameter(pad_size, material, settings)
-            radius = diameter / 2
-            if font_size >= radius * 0.8:
-                oversized_sizes.add(pad_size)
+        self.create_menus()
+        self.create_main_ui() 
         
-        if oversized_sizes:
-            oversized[material] = oversized_sizes
-    return oversized
-
-
-def leather_back_wrap(pad_size, multiplier):
-    base_wrap = 0
-    if pad_size >= 45:
-        base_wrap = 3.2
-    elif pad_size >= 12:
-        base_wrap = 1.2 + (pad_size - 12) * (2.0 / 33.0)
-    elif pad_size >= 6:
-        base_wrap = 1.0 + (pad_size - 6) * (0.2 / 6.0)
-    else:
-        base_wrap = 1.0
-    return base_wrap * multiplier
-
-def should_have_center_hole(pad_size, hole_dia, settings):
-    min_size = settings.get("min_hole_size", 16.5)
-    return hole_dia > 0 and pad_size >= min_size
-
-def get_felt_thickness_mm(settings):
-    thickness = settings.get("felt_thickness", 3.175)
-    if settings.get("felt_thickness_unit") == "in":
-        return thickness * 25.4
-    return thickness
-
-def can_all_pads_fit(pads, material, width_mm, height_mm, settings):
-    spacing_mm = 1.0
-    discs = []
-    
-    for pad in pads:
-        pad_size, qty = pad['size'], pad['qty']
-        diameter = get_disc_diameter(pad_size, material, settings)
-        for _ in range(qty): discs.append((pad_size, diameter))
-
-    discs.sort(key=lambda x: -x[1])
-    placed = []
-    for _, dia in discs:
-        r = dia / 2
-        placed_successfully = False
-        y = spacing_mm
-        while y + dia + spacing_mm <= height_mm and not placed_successfully:
-            x = spacing_mm
-            while x + dia + spacing_mm <= width_mm:
-                cx, cy = x + r, y + r
-                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
-                if not is_collision:
-                    placed.append((None, cx, cy, r))
-                    placed_successfully = True
-                    break
-                x += 1
-            y += 1
-    
-    return len(placed) == len(discs)
-
-def generate_svg(pads, material, width_mm, height_mm, filename, hole_dia_preset, settings):
-    spacing_mm = 1.0
-    discs = []
-
-    for pad in pads:
-        pad_size, qty = pad['size'], pad['qty']
-        diameter = get_disc_diameter(pad_size, material, settings)
-        for _ in range(qty): discs.append((pad_size, diameter))
-
-    discs.sort(key=lambda x: -x[1])
-    placed = []
-    for pad_size, dia in discs:
-        r = dia / 2
-        placed_successfully = False
-        y = spacing_mm
-        while y + dia + spacing_mm <= height_mm and not placed_successfully:
-            x = spacing_mm
-            while x + dia + spacing_mm <= width_mm:
-                cx, cy = x + r, y + r
-                is_collision = any((cx - px)**2 + (cy - py)**2 < (r + pr + spacing_mm)**2 for _, px, py, pr in placed)
-                if not is_collision:
-                    placed.append((pad_size, cx, cy, r))
-                    placed_successfully = True
-                    break
-                x += 1
-            y += 1
-
-    compatibility_mode = settings.get("compatibility_mode", False)
-    
-    if compatibility_mode:
-        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), viewBox=f"0 0 {width_mm} {height_mm}")
-        stroke_w = 0.1
-    else:
-        dwg = svgwrite.Drawing(filename, size=(f"{width_mm}mm", f"{height_mm}mm"), profile='tiny')
-        stroke_w = '0.1mm'
-
-    layer_colors = settings.get("layer_colors", DEFAULT_SETTINGS["layer_colors"])
-
-    for pad_size, cx, cy, r in placed:
+        self.apply_resonance_theme() 
         
-        # --- Check if darts are active for this pad ---
-        # ALL DARTING LOGIC REMOVED
-        darts_active = False
+        self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
 
-        # --- Draw Circle (Outline) ---
-        if compatibility_mode:
-            dwg.add(dwg.circle(center=(cx, cy), r=r, stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
+    def on_exit(self):
+        # Save settings from pad generator tab
+        self.settings["sheet_width"] = self.width_entry.get()
+        self.settings["sheet_height"] = self.height_entry.get()
+        self.settings["hole_option"] = self.hole_var.get()
+        if self.hole_var.get() == "Custom":
+            self.settings["custom_hole_size"] = self.custom_hole_entry.get()
+        
+        save_settings(self.settings)
+        self.root.destroy()
+
+    def apply_resonance_theme(self):
+        clicks = self.settings.get("resonance_clicks", 0)
+        color = self.default_bg
+        if 10 <= clicks < 50:
+            color = "#E0F7FA" # COOL_BLUE
+        elif 50 <= clicks < 100:
+            color = "#E8F5E9" # COOL_GREEN
+
+        self.set_background_color(self.root, color)
+        if clicks < 100:
+            self.root.attributes('-alpha', 1.0)
+
+    def set_background_color(self, parent, color):
+        try:
+            parent.configure(bg=color)
+        except tk.TclError:
+            pass
+        
+        style = ttk.Style()
+        style.configure('App.TFrame', background=color)
+        style.map('TNotebook.Tab', background=[('selected', color), ('!selected', color)], foreground=[('selected', 'black')])
+        style.configure('TNotebook', background=color)
+
+        for widget in parent.winfo_children():
+            widget_class = widget.winfo_class()
+            
+            if widget_class in ('Frame', 'Label', 'Radiobutton', 'Checkbutton', 'LabelFrame'):
+                try:
+                    widget.configure(bg=color)
+                except tk.TclError:
+                    pass
+            elif widget_class in ('TFrame', 'TLabel', 'TRadiobutton', 'TCheckbutton', 'TLabelframe', 'TNotebook'):
+                try:
+                    style_name = f"{widget_class}.{color.upper()}"
+                    style.configure(style_name, background=color)
+                    widget.configure(style=style_name)
+                except tk.TclError:
+                    pass
+
+            if isinstance(widget, (tk.Frame, tk.LabelFrame, ttk.Frame, ttk.LabelFrame, ttk.Notebook)):
+                self.set_background_color(widget, color)
+
+    def create_menus(self):
+        # --- Pad Generator Menu ---
+        self.pad_menu = tk.Menu(self.root)
+        
+        pad_file_menu = tk.Menu(self.pad_menu, tearoff=0)
+        self.pad_menu.add_cascade(label="File", menu=pad_file_menu)
+        pad_file_menu.add_command(label="Import Pad Presets...", command=self.on_import_pad_presets)
+        pad_file_menu.add_command(label="Export Pad Presets...", command=self.on_export_pad_presets)
+        pad_file_menu.add_separator()
+        pad_file_menu.add_command(label="Exit", command=self.on_exit)
+
+        pad_options_menu = tk.Menu(self.pad_menu, tearoff=0)
+        self.pad_menu.add_cascade(label="Options", menu=pad_options_menu)
+        pad_options_menu.add_command(label="Sizing Rules...", command=self.open_options_window)
+        pad_options_menu.add_command(label="Layer Colors...", command=self.open_color_window)
+        
+        self.root.config(menu=self.pad_menu) 
+
+    def create_main_ui(self):
+        # Using a main frame directly instead of tabs
+        self.main_frame = tk.Frame(self.root, bg=self.root.cget('bg'), padx=10, pady=10)
+        self.main_frame.pack(expand=True, fill="both")
+        self.create_pad_generator_tab(self.main_frame)
+
+    def create_pad_generator_tab(self, parent):
+        tk.Label(parent, text="Enter pad sizes (e.g. 42.0x3):", bg=self.root.cget('bg')).pack(pady=5)
+        self.pad_entry = tk.Text(parent, height=10)
+        self.pad_entry.pack(fill="x", padx=10)
+
+        preset_frame = tk.Frame(parent, bg=self.root.cget('bg'))
+        preset_frame.pack(pady=10)
+        
+        tk.Button(preset_frame, text="Save as Preset", command=self.on_save_pad_preset).pack(side="left", padx=5)
+        
+        tk.Label(preset_frame, text="Library:", bg=self.root.cget('bg')).pack(side="left", padx=(10, 2))
+        self.pad_library_var = tk.StringVar()
+        self.pad_library_dropdown = ttk.Combobox(preset_frame, textvariable=self.pad_library_var, state="readonly", width=15)
+        self.pad_library_dropdown.pack(side="left")
+        self.pad_library_dropdown.bind("<<ComboboxSelected>>", self.on_pad_library_selected)
+        
+        preset_names = [] 
+        self.pad_preset_var = tk.StringVar()
+        self.pad_preset_menu = ttk.Combobox(preset_frame, textvariable=self.pad_preset_var, values=preset_names, state="readonly", width=40) 
+        self.pad_preset_menu.set("Load Pad Preset")
+        self.pad_preset_menu.pack(side="left", padx=5)
+        self.pad_preset_menu.bind("<<ComboboxSelected>>", lambda e: self.on_load_pad_preset(self.pad_preset_var.get()))
+        
+        tk.Button(preset_frame, text="Delete Preset", command=self.on_delete_pad_preset).pack(side="left", padx=5)
+
+        self.update_pad_library_dropdown() 
+
+        tk.Label(parent, text="Select materials:", bg=self.root.cget('bg')).pack(pady=5)
+        self.material_vars = {
+            'felt': tk.BooleanVar(value=True), 
+            'card': tk.BooleanVar(value=True), 
+            'leather': tk.BooleanVar(value=True),
+            'exact_size': tk.BooleanVar(value=False)
+        }
+        for m in self.material_vars:
+            tk.Checkbutton(parent, text=m.replace('_', ' ').capitalize(), variable=self.material_vars[m], bg=self.root.cget('bg')).pack(anchor='w', padx=20)
+
+        options_frame = tk.Frame(parent, bg=self.root.cget('bg'))
+        options_frame.pack(pady=10, fill='x', padx=10)
+
+        hole_frame = tk.LabelFrame(options_frame, text="Center Hole", bg=self.root.cget('bg'), padx=5, pady=5)
+        hole_frame.pack(fill="x")
+        self.hole_var = tk.StringVar(value=self.settings["hole_option"])
+        
+        tk.Radiobutton(hole_frame, text="None", variable=self.hole_var, value="No center holes", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.0mm", variable=self.hole_var, value="3.0mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="3.5mm", variable=self.hole_var, value="3.5mm", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        tk.Radiobutton(hole_frame, text="Custom:", variable=self.hole_var, value="Custom", bg=self.root.cget('bg'), command=self.toggle_custom_hole_entry).pack(side="left")
+        
+        self.custom_hole_entry = tk.Entry(hole_frame, width=6)
+        self.custom_hole_entry.insert(0, self.settings.get("custom_hole_size", "4.0"))
+        self.custom_hole_entry.pack(side="left", padx=2)
+        tk.Label(hole_frame, text="mm", bg=self.root.cget('bg')).pack(side="left")
+        self.toggle_custom_hole_entry()
+
+        sheet_frame = tk.LabelFrame(options_frame, text="Sheet Size", bg=self.root.cget('bg'), padx=5, pady=5)
+        sheet_frame.pack(fill="x", pady=(10,0))
+
+        self.unit_label = tk.Label(sheet_frame, text=f"Width ({self.settings['units']}):", bg=self.root.cget('bg'))
+        self.unit_label.grid(row=0, column=0, sticky='w', padx=5)
+        self.width_entry = tk.Entry(sheet_frame)
+        self.width_entry.insert(0, self.settings["sheet_width"])
+        self.width_entry.grid(row=0, column=1, sticky='w')
+
+        self.height_label = tk.Label(sheet_frame, text=f"Height ({self.settings['units']}):", bg=self.root.cget('bg'))
+        self.height_label.grid(row=1, column=0, sticky='w', padx=5)
+        self.height_entry = tk.Entry(sheet_frame)
+        self.height_entry.insert(0, self.settings["sheet_height"])
+        self.height_entry.grid(row=1, column=1, sticky='w')
+
+        tk.Label(parent, text="Output filename base (no extension):", bg=self.root.cget('bg')).pack(pady=5)
+        self.filename_entry = tk.Entry(parent)
+        self.filename_entry.insert(0, "my_pad_job")
+        self.filename_entry.pack(padx=10) 
+
+        tk.Button(parent, text="Generate SVGs", command=self.on_generate, font=('Helvetica', 10, 'bold')).pack(pady=15)
+        
+    def on_pad_library_selected(self, event=None):
+        lib_name = self.pad_library_var.get()
+        preset_list = []
+        if lib_name == "All Libraries":
+            for library, presets in sorted(self.pad_presets.items()):
+                for name in sorted(presets.keys()):
+                    preset_list.append(f"[{library}] {name}")
         else:
-            dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{r}mm", stroke=layer_colors[f'{material}_outline'], fill='none', stroke_width=stroke_w))
-
-        hole_dia = 0
-        if should_have_center_hole(pad_size, hole_dia_preset, settings):
-            hole_dia = hole_dia_preset
-
-        # --- Draw Center Hole ---
-        if hole_dia > 0:
-            if compatibility_mode:
-                dwg.add(dwg.circle(center=(cx, cy), r=hole_dia / 2, stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
-            else:
-                dwg.add(dwg.circle(center=(f"{cx}mm", f"{cy}mm"), r=f"{hole_dia / 2}mm", stroke=layer_colors[f'{material}_center_hole'], fill='none', stroke_width=stroke_w))
-
-        font_size = settings.get("engraving_font_size", {}).get(material, 2.0)
+            preset_list = sorted(self.pad_presets.get(lib_name, {}).keys())
         
-        # --- Draw Engraving Text ---
-        if settings.get("engraving_on", True) and (font_size < r * 0.8): # Dart check removed
-            engraving_settings = settings["engraving_location"][material]
-            mode = engraving_settings['mode']
-            value = engraving_settings['value']
-            
-            engraving_y = 0
-            if mode == 'from_outside':
-                engraving_y = cy - (r - value)
-            elif mode == 'from_inside':
-                hole_r = hole_dia / 2 if hole_dia > 0 else 0
-                engraving_y = cy - (hole_r + value)
-            else: # centered
-                hole_r = hole_dia / 2 if hole_dia > 0 else 1.75
-                offset_from_center = (r + hole_r) / 2
-                engraving_y = cy - offset_from_center
+        self.pad_preset_menu['values'] = preset_list
+        self.pad_preset_menu.set("Load Pad Preset")
 
-            vertical_adjust = font_size * 0.35
-            text_content = f"{pad_size:.1f}".rstrip('0').rstrip('.')
-            
-            if compatibility_mode:
-                dwg.add(dwg.text(text_content,
-                                 insert=(cx, engraving_y + vertical_adjust),
-                                 text_anchor="middle",
-                                 font_size=font_size,
-                                 fill=layer_colors[f'{material}_engraving']))
-            else:
-                dwg.add(dwg.text(text_content,
-                                 insert=(f"{cx}mm", f"{engraving_y + vertical_adjust}mm"),
-                                 text_anchor="middle",
-                                 font_size=f"{font_size}mm",
-                                 fill=layer_colors[f'{material}_engraving']))
+    def update_pad_library_dropdown(self):
+        lib_names = ["All Libraries"] + sorted(self.pad_presets.keys())
+        self.pad_library_dropdown['values'] = lib_names
+        self.pad_library_var.set("All Libraries")
+        self.on_pad_library_selected()
+
+    # --- Pad Preset Import/Export Wrappers ---
+    def on_import_pad_presets(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Pad Presets",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+            initialdir=self.settings.get("last_output_dir", "")
+        )
+        if not filepath:
+            return
+        try:
+            with open(filepath, 'r') as f:
+                imported_presets = json.load(f)
+            if not isinstance(imported_presets, dict):
+                raise TypeError("File is not a valid preset dictionary.")
+
+            target_lib = ImportTargetWindow(self.root, list(self.pad_presets.keys())).get_target_library()
+            if not target_lib:
+                return 
+
+            if target_lib not in self.pad_presets:
+                self.pad_presets[target_lib] = {}
+
+            ImportPresetsWindow(self.root, self.pad_presets[target_lib], imported_presets, PAD_PRESET_FILE, self.pad_preset_menu, self, "Pad Preset", save_data=self.pad_presets)
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Could not import pad presets:\n{e}")
+
+    def on_export_pad_presets(self):
+        ExportPresetsWindow(self.root, self.pad_presets, "Pad Presets", "pad_preset_export.json", False)
+
+    # --- Misc Wrappers ---
+    def toggle_custom_hole_entry(self):
+        if self.hole_var.get() == "Custom":
+            self.custom_hole_entry.config(state='normal')
+        else:
+            self.custom_hole_entry.config(state='disabled')
+
+    def open_options_window(self):
+        OptionsWindow(self.root, self, self.settings, self.update_ui_from_settings, lambda: save_settings(self.settings))
         
-        # --- Draw Darts (if applicable) ---
-        # ALL DARTING LOGIC REMOVED
+    def open_color_window(self):
+        LayerColorWindow(self.root, self.settings, lambda: save_settings(self.settings))
+        
+    def open_resonance_window(self):
+        ResonanceWindow(self.root, self.settings, lambda: save_settings(self.settings), self.apply_resonance_theme)
 
-    dwg.save()
+    def update_ui_from_settings(self):
+        self.unit_label.config(text=f"Width ({self.settings['units']}):")
+        self.height_label.config(text=f"Height ({self.settings['units']}):")
+
+    def get_hole_dia(self):
+        hole_option = self.hole_var.get()
+        if hole_option == "3.5mm": return 3.5
+        if hole_option == "3.0mm": return 3.0
+        if hole_option == "Custom":
+            try:
+                return float(self.custom_hole_entry.get())
+            except (ValueError, TypeError):
+                messagebox.showerror("Invalid Input", "Custom hole size must be a valid number.")
+                return None
+        return 0
+
+    def on_generate(self):
+        try:
+            hole_dia = self.get_hole_dia()
+            if hole_dia is None: return
+
+            pads = self.parse_pad_list(self.pad_entry.get("1.0", tk.END))
+            if not pads:
+                messagebox.showerror("Error", "No valid pad sizes entered.")
+                return
+
+            if self.settings.get("engraving_on", True):
+                oversized_engravings = check_for_oversized_engravings(pads, self.material_vars, self.settings)
+                if oversized_engravings and self.settings.get("show_engraving_warning", True):
+                    message = "Warning: The current font size is too large for some pads and the engraving will be skipped:\n\n"
+                    for mat, sizes in oversized_engravings.items():
+                        message += f"- {mat.replace('_', ' ').capitalize()}: {', '.join(map(str, sorted(sizes)))}\n"
+                    message += "\nDo you want to proceed?"
+
+                    dialog = ConfirmationDialog(self.root, "Engraving Size Warning", message)
+                    if not dialog.result:
+                        return
+                    if dialog.dont_show_again.get():
+                        self.settings["show_engraving_warning"] = False
+
+            width_val = float(self.width_entry.get())
+            height_val = float(self.height_entry.get())
+            
+            if self.settings['units'] == 'in':
+                width_mm, height_mm = width_val * 25.4, height_val * 25.4
+            elif self.settings['units'] == 'cm':
+                width_mm, height_mm = width_val * 10, height_val * 10
+            elif self.settings['units'] == 'mm':
+                width_mm, height_mm = width_val, height_val
+            else:
+                messagebox.showerror("Error", f"Unknown unit '{self.settings['units']}' in settings.")
+                return
+
+
+            base = self.filename_entry.get().strip()
+            if not base:
+                messagebox.showerror("Error", "Please enter a base filename.")
+                return
+            
+            for material, var in self.material_vars.items():
+                if var.get() and not can_all_pads_fit(pads, material, width_mm, height_mm, self.settings):
+                    messagebox.showerror("Nesting Error", f"Could not fit all '{material.replace('_',' ')}' pieces on the specified sheet size.")
+                    return
+
+            save_dir = filedialog.askdirectory(title="Select Folder to Save SVGs", initialdir=self.settings.get("last_output_dir", ""))
+            if not save_dir:
+                return
+            
+            self.settings["last_output_dir"] = save_dir 
+
+            files_generated = False
+            for material, var in self.material_vars.items():
+                if var.get():
+                    filename = os.path.join(save_dir, f"{base}_{material}.svg")
+                    generate_svg(pads, material, width_mm, height_mm, filename, hole_dia, self.settings)
+                    files_generated = True
+            
+            if files_generated:
+                save_settings(self.settings) 
+                messagebox.showinfo("Done", "SVGs generated successfully.")
+            else:
+                messagebox.showwarning("No Materials Selected", "Please select at least one material.")
+
+        except Exception as e:
+            print(f"An error occurred during SVG generation: {e}")
+            messagebox.showerror("An Error Occurred", f"Something went wrong during generation:\n\n{e}")
+
+    def parse_pad_list(self, pad_input):
+        pad_list = []
+        for line in pad_input.strip().splitlines():
+            try:
+                size, qty = map(float, line.strip().lower().split('x'))
+                pad_list.append({'size': size, 'qty': int(qty)})
+            except ValueError:
+                continue
+        return pad_list
+    
+    # --- Wrapper Methods for Presets ---
+    def on_save_pad_preset(self):
+        self.on_save_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_entry, self.pad_preset_menu, "Pad", self.pad_library_var)
+        
+    def on_delete_pad_preset(self):
+        self.on_delete_preset(self.pad_presets, PAD_PRESET_FILE, self.pad_preset_var, self.pad_preset_menu, self.pad_entry, "Pad", self.pad_library_var, self.on_pad_library_selected)
+    
+    def on_load_pad_preset(self, selected_name):
+        self.on_load_preset(selected_name, self.pad_presets, self.pad_entry, self.pad_library_var, "Load Pad Preset")
+
+    # Using the shared preset logic from the class
+    def on_save_preset(self, presets, file_path, entry_widget, menu_widget, preset_type_name, library_var):
+        active_library = library_var.get()
+        if not active_library or active_library == "All Libraries":
+            messagebox.showwarning("Save Error", "Please select a specific library to save to.")
+            return
+
+        name = simpledialog.askstring(f"Save {preset_type_name} Preset", "Enter a name for this preset:")
+        if name:
+            text_data = entry_widget.get("1.0", tk.END)
+            if not text_data.strip():
+                messagebox.showwarning(f"Save {preset_type_name} Preset", "Cannot save an empty list.")
+                return
+            
+            if active_library not in presets:
+                presets[active_library] = {}
+
+            if name in presets[active_library]:
+                if not messagebox.askyesno("Overwrite", f"A set named '{name}' already exists in this library. Overwrite it?"):
+                    return
+            
+            presets[active_library][name] = text_data
+            
+            if save_presets(presets, file_path):
+                if preset_type_name == "Pad":
+                    self.on_pad_library_selected()
+                messagebox.showinfo("Preset Saved", f"Preset '{name}' saved successfully.")
+
+    def on_load_preset(self, selected_name, presets, entry_widget, library_var, load_label):
+        if not selected_name or selected_name == load_label:
+            return
+            
+        lib_name = library_var.get()
+        data = None
+        
+        if lib_name == "All Libraries":
+            try:
+                lib_name, preset_name = selected_name.split("] ", 1)
+                lib_name = lib_name[1:] 
+                if lib_name in presets and preset_name in presets[lib_name]:
+                    data = presets[lib_name][preset_name]
+            except ValueError:
+                return 
+        else:
+            if lib_name in presets and selected_name in presets[lib_name]:
+                data = presets[lib_name][selected_name]
+
+        if data:
+            entry_widget.delete("1.0", tk.END)
+            entry_widget.insert(tk.END, data)
+
+    def on_delete_preset(self, presets, file_path, preset_var, menu_widget, entry_widget, preset_type_name, library_var, library_refresh_func):
+        selected_lib = library_var.get()
+        selected_preset = preset_var.get()
+
+        if not selected_preset or selected_preset.startswith("Load"):
+            messagebox.showwarning("Delete Error", "Please load a set to delete.")
+            return
+
+        if selected_lib == "All Libraries":
+            try:
+                selected_lib, selected_preset = selected_preset.split("] ", 1)
+                selected_lib = selected_lib[1:]
+            except ValueError:
+                messagebox.showerror("Delete Error", "Cannot delete from 'All Libraries' view. Please select the specific library first.")
+                return
+        
+        if messagebox.askyesno(f"Delete {preset_type_name} Preset", f"Are you sure you want to delete the preset '{selected_preset}' from the '{selected_lib}' library?"):
+            if selected_lib in presets and selected_preset in presets[selected_lib]:
+                del presets[selected_lib][selected_preset]
+                if save_presets(presets, file_path):
+                    library_refresh_func() 
+                    if isinstance(entry_widget, tk.Text):
+                        entry_widget.delete("1.0", tk.END)
+                    messagebox.showinfo("Preset Deleted", f"Preset '{selected_preset}' deleted.")
+            else:
+                messagebox.showerror("Delete Error", "Could not find the preset to delete.")
 
 if __name__ == '__main__':
     root = tk.Tk()
