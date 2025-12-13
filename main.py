@@ -530,8 +530,8 @@ class OptionsWindow:
         self.felt_thickness_var = tk.DoubleVar(value=self.settings["felt_thickness"])
         self.felt_thickness_unit_var = tk.StringVar(value=self.settings["felt_thickness_unit"])
         
-        # NEW VARS FOR v2.1
-        self.darts_enabled_var = tk.BooleanVar(value=self.settings.get("darts_enabled", True))
+        # --- Dart variables ---
+        self.dart_enabled_var = tk.BooleanVar(value=self.settings.get("darts_enabled", True))
         self.dart_threshold_var = tk.DoubleVar(value=self.settings.get("dart_threshold", 18.0))
         self.dart_overwrap_var = tk.DoubleVar(value=self.settings.get("dart_overwrap", 0.5))
         self.dart_wrap_bonus_var = tk.DoubleVar(value=self.settings.get("dart_wrap_bonus", 0.75))
@@ -590,7 +590,7 @@ class OptionsWindow:
         darts_frame.pack(fill="x", pady=5)
         darts_frame.columnconfigure(1, weight=1)
         
-        tk.Checkbutton(darts_frame, text="Enable Star / Dart Pattern", variable=self.darts_enabled_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+        tk.Checkbutton(darts_frame, text="Enable Star / Dart Pattern", variable=self.dart_enabled_var, bg="#F0EAD6").grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
         
         tk.Label(darts_frame, text="Use Star Pattern below (mm):", bg="#F0EAD6").grid(row=1, column=0, sticky='w', pady=2)
         tk.Entry(darts_frame, textvariable=self.dart_threshold_var, width=10).grid(row=1, column=1, sticky='w', pady=2)
@@ -679,7 +679,7 @@ class OptionsWindow:
         self.settings["felt_thickness_unit"] = self.felt_thickness_unit_var.get()
         
         # NEW SAVE LOGIC
-        self.settings["darts_enabled"] = self.darts_enabled_var.get()
+        self.settings["darts_enabled"] = self.dart_enabled_var.get()
         self.settings["dart_threshold"] = self.dart_threshold_var.get()
         self.settings["dart_overwrap"] = self.dart_overwrap_var.get()
         self.settings["dart_wrap_bonus"] = self.dart_wrap_bonus_var.get()
@@ -705,7 +705,7 @@ class OptionsWindow:
         # Export
         self.settings["compatibility_mode"] = self.compatibility_mode_var.get()
         
-        save_settings(self.settings)
+        self.save_callback()
         self.update_callback()
         self.top.destroy()
 
@@ -721,7 +721,7 @@ class OptionsWindow:
             self.felt_thickness_unit_var.set(DEFAULT_SETTINGS["felt_thickness_unit"])
             
             # NEW REVERT LOGIC
-            self.darts_enabled_var.set(DEFAULT_SETTINGS.get("darts_enabled", True))
+            self.dart_enabled_var.set(DEFAULT_SETTINGS.get("darts_enabled", True))
             self.dart_threshold_var.set(DEFAULT_SETTINGS.get("dart_threshold", 18.0))
             self.dart_overwrap_var.set(DEFAULT_SETTINGS.get("dart_overwrap", 0.5))
             self.dart_wrap_bonus_var.set(DEFAULT_SETTINGS.get("dart_wrap_bonus", 0.75))
@@ -1104,7 +1104,8 @@ class ImportPresetsWindow(tk.Toplevel):
                 added_count += 1
         
         if added_count > 0:
-            if self.parent_app.save_presets(self.save_data, self.file_path):
+            # FIX: Changed self.parent_app.save_presets to just save_presets
+            if save_presets(self.save_data, self.file_path):
                 self.parent_app.update_pad_library_dropdown()
                 
                 messagebox.showinfo("Import Successful", 
