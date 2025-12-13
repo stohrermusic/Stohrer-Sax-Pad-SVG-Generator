@@ -1,8 +1,8 @@
 Stohrer-Sax-Pad-SVG-Generator
-Generates SVGs for laser cutting saxophone felts, cards, and leathers. Current- and likely final- version is 2.1.
+Generates SVGs for laser cutting saxophone felts, cards, and leathers. Current- and likely final- version is 2.11.
 
 
-2.1, Last major update!  Further development of new features (mostly non SVG related) will continue in the [Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)
+2.11, bugfixes to Last major update!  Further development of new features (mostly non SVG related) will continue in the [Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)
 
 Features of this SVG generator standalone app: Pad leather/felt/card SVG creation, basic nesting, layout in proscribed space (unless it won't fit), save/delete pad presets, center hole options (none, 3.0mm, 3.5mm, custom), user-defined minimum pad size for center hole, select inches-cm-mm for sheet size, advanced options to change sizing rules, custom rules for size engraving on materials, import/export of pad set presets, multiple libraries of pad size presets, user-adjustable darting settings for pad leather.  
 
