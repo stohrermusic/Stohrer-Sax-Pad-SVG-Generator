@@ -1032,6 +1032,8 @@ class PadSVGGeneratorApp:
                 if len(parts) != 2:
                     continue
                 size = float(parts[0].strip())
+                if size <= 0:
+                    continue
                 qty_str = parts[1].strip()
                 if qty_str == 'max':
                     pad_list.append({'size': size, 'qty': 'max'})
