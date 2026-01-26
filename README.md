@@ -1,34 +1,93 @@
-Stohrer-Sax-Pad-SVG-Generator
-Generates SVGs for laser cutting saxophone felts, cards, and leathers. Current- and likely final- version is 2.11.
+# Stohrer Sax Pad SVG Generator
 
+A cross-platform desktop app for generating SVG and G-code files for laser-cutting saxophone pad materials (felt, card, leather).
 
-2.11, bugfixes to Last major update!  Further development of new features (mostly non SVG related) will continue in the [Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)
+## Features
 
-Features of this SVG generator standalone app: Pad leather/felt/card SVG creation, basic nesting, layout in proscribed space (unless it won't fit), save/delete pad presets, center hole options (none, 3.0mm, 3.5mm, custom), user-defined minimum pad size for center hole, select inches-cm-mm for sheet size, advanced options to change sizing rules, custom rules for size engraving on materials, import/export of pad set presets, multiple libraries of pad size presets, user-adjustable darting settings for pad leather.  
+### SVG & G-code Generation
+- Generate cut patterns for **felt**, **card**, **leather**, and **exact size** pads
+- **G-code output** for Grbl-based laser cutters (with per-material speed/power settings)
+- Smart nesting algorithm to maximize material usage
+- **Star/dart patterns** for small leather pads (configurable threshold)
+- Configurable sizing rules, center holes, and engraving labels
+- Per-material kerf compensation
 
+### Custom Polygon Shapes
+- Draw irregular shapes for leather skins and scrap pieces
+- Grid-based shape definition (up to 8 points)
+- Smart nesting: large pads go center, small pads fill edges/corners
+- **Max fill mode**: use `18.0 x max` to fill remaining space with a pad size
 
-SVG generation should work with default settings for leather between .011"- .014", and sizing of leather disc assumes a .125" thick felt with cardstock between .010 and .025 being acceptable for overwrap, providing for a final pad thickness of .160" to .175" or so.
+### Scrap Mode
+- Place pads across multiple irregularly-sized scrap pieces
+- Enter all pad sizes, then cycle through scraps
+- Tracks remaining pads across multiple output files
+- Works with both SVG and G-code output
 
-You will need to apply your own feeds/speeds and kerf settings depending on your cutter in Lightburn. SVGs may not present correctly in other apps (especially default image viewers). 
+### Workflow Features
+- Save and load pad presets organized by library
+- Import/export presets for backup or sharing
+- **Send G-code to SD Card** with auto-eject (Windows)
+- Remembers last used settings and output directory
 
-Make sure to enter the pad sizes like it suggests, e.g. "34.0 x 10" without the quotes, and each size on a different line.  If you use a comma rather than a decimal point, the value will be ignored.  
+## Usage
 
-Windows is the intented OS, and there is no Mac version.
+Enter pad sizes in the format `size x quantity`, one per line:
+```
+34.0 x 10
+28.5 x 5
+22.0 x 8
+```
 
-If you wish to run this in linux with python3, you must also install python3-svgwrite and python3-tk, but I can provide no technical support.
+Select your materials, set sheet dimensions, and click Generate SVG or Generate G-code.
 
-For Windows, put the .exe in a folder. Your presets and preferences will be saved in json files in that folder. If you are upgrading from a previous version, simply replace the .exe and leave the .jsons and your old settings and presets will carry over.  
+**Note**: Use decimal points (not commas) for sizes. Values with commas will be ignored.
 
-For Windows you get a warming against running "unsigned" programs since I am not going to pay a fee to be a "developer" to make that go away.  Only happens on first run.  
+## Installation
 
-I have no idea how to code, this was made with chatbots. Hope it works for you!
+### From Release (Recommended)
+Download the latest release for your platform from the [Releases](https://github.com/stohrermusic/Stohrer-Sax-Pad-SVG-Generator/releases) page.
 
--Matt
+### From Source
+```bash
+pip install -r requirements.txt
+python main.py
+```
 
-<img width="1527" height="1000" alt="image" src="https://github.com/user-attachments/assets/248826f3-d1b9-4f94-bda0-edda04f9d711" />
+## Building
 
+```bash
+# Build for current platform
+python build.py
 
+# Clean and rebuild
+python build.py --clean
 
+# macOS: create .dmg
+python build.py --dmg
+```
 
+## Config Location
 
+Settings and presets are stored in platform-appropriate locations:
+- **Windows**: `%APPDATA%\StohrerSaxPadSVGGenerator\`
+- **macOS**: `~/Library/Application Support/StohrerSaxPadSVGGenerator/`
+- **Linux**: `~/.config/StohrerSaxPadSVGGenerator/`
 
+Existing config files from older versions (in the app folder) are automatically migrated on first run.
+
+## Notes
+
+- SVG output is optimized for LightBurn. Other apps may not display layers correctly.
+- Default leather sizing assumes ~0.125" felt thickness. Adjust in Options if needed.
+- Windows users may see an "unsigned program" warning on first run—this is normal.
+
+## See Also
+
+For additional features like key height databases, serial number lookup, and screw specifications, see [Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion).
+
+---
+
+Made for saxophone techs, by a saxophone tech.
+
+<img width="640" alt="Screenshot" src="https://github.com/user-attachments/assets/248826f3-d1b9-4f94-bda0-edda04f9d711" />
