@@ -30,7 +30,7 @@ class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Stohrer Sax Pad SVG Generator")
-        self.root.geometry("640x600")
+        self.root.geometry("640x720")
         self.default_bg = "#FFFDD0"
         self.root.configure(bg=self.default_bg)
 
