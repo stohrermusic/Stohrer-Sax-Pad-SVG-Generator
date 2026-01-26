@@ -1,32 +1,93 @@
-name: Build EXE
+name: Build Releases
 
 on:
   push:
-    branches: [ main, beta, gamma ]
+    branches: [main, beta, gamma]
+  release:
+    types: [created]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: StohrerPadGenerator.exe
+            asset_name: StohrerPadGenerator-Windows.exe
+          - os: macos-latest
+            artifact_name: StohrerPadGenerator.app
+            asset_name: StohrerPadGenerator-macOS.zip
+          - os: ubuntu-latest
+            artifact_name: StohrerPadGenerator
+            asset_name: StohrerPadGenerator-Linux
+
+    runs-on: ${{ matrix.os }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: pip install pyinstaller svgwrite
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Build with PyInstaller
-      # We use the basic command because it is now a single file again
-      run: pyinstaller --noconsole --onefile --name "StohrerPadGenerator" main.py
+      - name: Build with PyInstaller
+        run: python build.py
 
-    - name: Upload EXE
-      uses: actions/upload-artifact@v4
-      with:
-        name: StohrerPadGenerator
-        path: dist/StohrerPadGenerator.exe
+      # Rename artifacts for release
+      - name: Rename Windows artifact
+        if: matrix.os == 'windows-latest'
+        run: mv dist/StohrerPadGenerator.exe dist/StohrerPadGenerator-Windows.exe
+
+      - name: Rename Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        run: mv dist/StohrerPadGenerator dist/StohrerPadGenerator-Linux
+
+      # macOS: Create zip of .app bundle
+      - name: Package macOS app
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r StohrerPadGenerator-macOS.zip StohrerPadGenerator.app
+
+      # Upload artifacts for all builds
+      - name: Upload Windows artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StohrerPadGenerator-Windows
+          path: dist/StohrerPadGenerator-Windows.exe
+
+      - name: Upload macOS artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StohrerPadGenerator-macOS
+          path: dist/StohrerPadGenerator-macOS.zip
+
+      - name: Upload Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StohrerPadGenerator-Linux
+          path: dist/StohrerPadGenerator-Linux
+
+      # Attach to release if this is a release event
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
