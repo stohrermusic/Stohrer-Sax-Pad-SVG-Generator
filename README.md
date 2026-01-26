@@ -90,4 +90,4 @@ For additional features like key height databases, serial number lookup, and scr
 
 Made for saxophone techs, by a saxophone tech.
 
-<img width="640" alt="Screenshot" src="https://github.com/user-attachments/assets/248826f3-d1b9-4f94-bda0-edda04f9d711" />
+![Screenshot](screenshot.png)
