@@ -212,6 +212,7 @@ DEFAULT_SETTINGS = {
 
     # TUTORIAL FLAGS
     "seen_polygon_tutorial": False,
+    "seen_sdcard_tutorial": False,
 
     "engraving_font_size": {
         "felt": 3.0,
