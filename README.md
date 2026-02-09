@@ -1,5 +1,11 @@
 # Stohrer Sax Pad SVG Generator
 
+## DEPRECATED - NO LONGER UPDATED
+
+This app has been superseded by **[Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)**, which includes all of the same SVG/G-code generation features plus key height databases, serial number lookup, and screw specifications. Please download the Companion instead.
+
+---
+
 A cross-platform desktop app for generating SVG and G-code files for laser-cutting saxophone pad materials (felt, card, leather).
 
 ## Features
