@@ -2,7 +2,7 @@
 
 ## DEPRECATED - NO LONGER UPDATED
 
-This app has been superseded by **[Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)**, which includes all of the same SVG/G-code generation features plus key height databases, serial number lookup, and screw specifications. Please download the Companion instead.
+This app has been superseded by **[Stohrer Sax Shop Companion](https://github.com/stohrermusic/Stohrer-Sax-Shop-Companion)**, which includes improved and expanded SVG/G-code generation features plus key height databases, serial number lookup, and screw specifications. Please download the Companion instead.
 
 ---
 
