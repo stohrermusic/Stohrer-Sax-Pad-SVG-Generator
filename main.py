@@ -19,20 +19,29 @@ from ui_dialogs import (
     OptionsWindow, LayerColorWindow,
     ResonanceWindow, ConfirmationDialog,
     ImportPresetsWindow, ExportPresetsWindow,
-    PolygonDrawWindow, GcodeSettingsWindow
+    PolygonDrawWindow, GcodeSettingsWindow,
+    DIALOG_BG
 )
 
 # ==========================================
 # MAIN APP CLASS
 # ==========================================
 
+IS_MACOS = sys.platform == 'darwin'
+
 class PadSVGGeneratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Stohrer Sax Pad SVG Generator")
         self.root.geometry("640x720")
-        self.default_bg = "#FFFDD0"
-        self.root.configure(bg=self.default_bg)
+
+        # On macOS, use native system colors (supports dark/light mode).
+        # On Windows/Linux, use our custom cream theme.
+        if IS_MACOS:
+            self.default_bg = self.root.cget('bg')
+        else:
+            self.default_bg = "#FFFDD0"
+            self.root.configure(bg=self.default_bg)
 
         self.settings = load_settings()
         self.pad_presets = load_presets(PAD_PRESET_FILE, preset_type_name="Pad Preset")
@@ -83,6 +92,8 @@ class PadSVGGeneratorApp:
 
     def _get_theme_color(self):
         """Get the current theme background color based on resonance clicks."""
+        if IS_MACOS:
+            return self.default_bg
         clicks = self.settings.get("resonance_clicks", 0)
         if 10 <= clicks < 50:
             return "#E0F7FA"  # COOL_BLUE
@@ -91,6 +102,8 @@ class PadSVGGeneratorApp:
         return self.default_bg
 
     def apply_resonance_theme(self):
+        if IS_MACOS:
+            return
         color = self._get_theme_color()
         self.set_background_color(self.root, color)
         clicks = self.settings.get("resonance_clicks", 0)
@@ -98,6 +111,8 @@ class PadSVGGeneratorApp:
             self.root.attributes('-alpha', 1.0)
 
     def set_background_color(self, parent, color):
+        if IS_MACOS:
+            return
         try:
             parent.configure(bg=color)
         except tk.TclError:
@@ -1362,20 +1377,20 @@ class ImportTargetWindow(tk.Toplevel):
         super().__init__(parent)
         self.title("Select Target Library")
         self.geometry("350x200")
-        self.configure(bg="#F0EAD6")
+        self.configure(bg=DIALOG_BG)
         self.transient(parent)
         self.grab_set()
 
         self.result = None
         self.existing_libraries = existing_libraries
 
-        tk.Label(self, text="Import presets into which library?", bg="#F0EAD6", font=("Helvetica", 11)).pack(pady=15)
+        tk.Label(self, text="Import presets into which library?", bg=DIALOG_BG, font=("Helvetica", 11)).pack(pady=15)
 
         # Option 1: Existing library dropdown
-        existing_frame = tk.Frame(self, bg="#F0EAD6")
+        existing_frame = tk.Frame(self, bg=DIALOG_BG)
         existing_frame.pack(pady=5)
         self.radio_var = tk.StringVar(value="existing")
-        tk.Radiobutton(existing_frame, text="Existing library:", variable=self.radio_var, value="existing", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(existing_frame, text="Existing library:", variable=self.radio_var, value="existing", bg=DIALOG_BG).pack(side="left")
         self.lib_var = tk.StringVar()
         self.lib_dropdown = ttk.Combobox(existing_frame, textvariable=self.lib_var, state="readonly", width=20)
         self.lib_dropdown['values'] = existing_libraries if existing_libraries else ["(none)"]
@@ -1384,14 +1399,14 @@ class ImportTargetWindow(tk.Toplevel):
         self.lib_dropdown.pack(side="left", padx=5)
 
         # Option 2: New library entry
-        new_frame = tk.Frame(self, bg="#F0EAD6")
+        new_frame = tk.Frame(self, bg=DIALOG_BG)
         new_frame.pack(pady=5)
-        tk.Radiobutton(new_frame, text="Create new:", variable=self.radio_var, value="new", bg="#F0EAD6").pack(side="left")
+        tk.Radiobutton(new_frame, text="Create new:", variable=self.radio_var, value="new", bg=DIALOG_BG).pack(side="left")
         self.new_entry = tk.Entry(new_frame, width=22)
         self.new_entry.pack(side="left", padx=5)
 
         # Buttons
-        btn_frame = tk.Frame(self, bg="#F0EAD6")
+        btn_frame = tk.Frame(self, bg=DIALOG_BG)
         btn_frame.pack(pady=15)
         tk.Button(btn_frame, text="OK", command=self.on_ok, width=10).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancel", command=self.on_cancel, width=10).pack(side="left", padx=5)
