@@ -170,8 +170,12 @@ DEFAULT_SETTINGS = {
     "gcode_output_enabled": False,
     "gcode_settings": {
         "felt": {
+            "engraving_mode": "line",
             "engraving_speed": 1200,
             "engraving_power": 8,
+            "filled_engraving_speed": 1000,
+            "filled_engraving_power": 12,
+            "filled_line_spacing": 0.15,
             "hole_speed": 300,
             "hole_power": 35,
             "cut_speed": 600,
@@ -179,8 +183,12 @@ DEFAULT_SETTINGS = {
             "kerf_width": 0.5,
         },
         "card": {
+            "engraving_mode": "line",
             "engraving_speed": 1500,
             "engraving_power": 10,
+            "filled_engraving_speed": 1200,
+            "filled_engraving_power": 15,
+            "filled_line_spacing": 0.15,
             "hole_speed": 400,
             "hole_power": 22.5,
             "cut_speed": 1500,
@@ -188,17 +196,12 @@ DEFAULT_SETTINGS = {
             "kerf_width": 0.2,
         },
         "leather": {
+            "engraving_mode": "line",
             "engraving_speed": 2200,
             "engraving_power": 5,
-            "hole_speed": 300,
-            "hole_power": 30,
-            "cut_speed": 1200,
-            "cut_power": 75,
-            "kerf_width": 0.3,
-        },
-        "leather_topgrain": {
-            "engraving_speed": 2200,
-            "engraving_power": 5,
+            "filled_engraving_speed": 1800,
+            "filled_engraving_power": 8,
+            "filled_line_spacing": 0.15,
             "hole_speed": 300,
             "hole_power": 30,
             "cut_speed": 1200,
@@ -206,6 +209,10 @@ DEFAULT_SETTINGS = {
             "kerf_width": 0.3,
         },
     },
+
+    # FILLED ENGRAVING OPTIONS
+    "filled_overscan_enabled": False,
+    "filled_overscan_mm": 1.5,
 
     # SD CARD SETTINGS
     "sd_card_path": "",
